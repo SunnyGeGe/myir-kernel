@@ -22,7 +22,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x80000000 0x20000000>; /* 512 MB */
+		reg = <0x80000000 0x40000000>; /* 1G MB */
 	};
 
 	vbat: fixedregulator@0 {
@@ -761,47 +761,47 @@
 		#size-cells = <1>;
 		partition@0 {
 			label = "NAND.SPL";
-			reg = <0x00000000 0x000020000>;
+			reg = <0x00000000 0x000080000>;
 		};
 		partition@1 {
 			label = "NAND.SPL.backup1";
-			reg = <0x00020000 0x00020000>;
+			reg = <0x00080000 0x00080000>;
 		};
 		partition@2 {
 			label = "NAND.SPL.backup2";
-			reg = <0x00040000 0x00020000>;
+			reg = <0x00100000 0x00080000>;
 		};
 		partition@3 {
 			label = "NAND.SPL.backup3";
-			reg = <0x00060000 0x00020000>;
+			reg = <0x00180000 0x00080000>;
 		};
 		partition@4 {
 			label = "NAND.u-boot-spl-os";
-			reg = <0x00080000 0x00040000>;
+			reg = <0x00200000 0x00080000>;
 		};
 		partition@5 {
 			label = "NAND.u-boot";
-			reg = <0x000C0000 0x00100000>;
+			reg = <0x00280000 0x00100000>;
 		};
 		partition@6 {
 			label = "NAND.u-boot-env";
-			reg = <0x001C0000 0x00020000>;
+			reg = <0x00380000 0x00080000>;
 		};
 		partition@7 {
 			label = "NAND.u-boot-env.backup1";
-			reg = <0x001E0000 0x00020000>;
+			reg = <0x00400000 0x00080000>;
 		};
 		partition@8 {
 			label = "NAND.kernel";
-			reg = <0x00200000 0x00800000>;
+			reg = <0x00480000 0x00800000>;
 		};
 		partition@9 {
 			label = "NAND.rootfs";
-			reg = <0x00A00000 0x0D600000>;
+			reg = <0x00c80000 0x0D600000>;
 		};
 		partition@10 {
 			label = "NAND.userdata";
-			reg = <0x0E000000 0>;
+			reg = <0x0E280000 0>;
 		};		
 	};
 };
