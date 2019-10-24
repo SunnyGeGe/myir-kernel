@@ -801,8 +801,12 @@
 			reg = <0x07400000 0x04000000>;
 		};
 		partition@15 {
+			label = "NAND.overlay";
+			reg = <0x02000000 0x0b400000>;
+		};
+		partition@16 {
 			label = "NAND.userdata";
-			reg = <0x0B400000 0>;
+			reg = <0x0d400000 0>;
 		};		
 	};
 };
