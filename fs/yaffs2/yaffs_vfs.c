@@ -155,10 +155,10 @@
 #define set_nlink(inode, count)  do { (inode)->i_nlink = (count); } while(0)
 #endif
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(4, 1, 0))
-#define f_dentry f_path.dentry
-#define f_vfsmnt f_path.mnt
-#endif
+//#if (LINUX_VERSION_CODE > KERNEL_VERSION(4, 1, 0))
+//#define f_dentry f_path.dentry
+//#define f_vfsmnt f_path.mnt
+//#endif
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 28))
 static uint32_t YCALCBLOCKS(uint64_t partition_size, uint32_t block_size)
@@ -246,7 +246,7 @@ MODULE_PARM(yaffs_gc_control, "i");
 #define YAFFS_USE_DIR_ITERATE
 #endif
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0))
 #define YAFFS_USE_XATTR
 #endif
 
@@ -255,13 +255,15 @@ MODULE_PARM(yaffs_gc_control, "i");
 #include <linux/seq_file.h>
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
 #define PAGE_CACHE_SIZE PAGE_SIZE
 #define PAGE_CACHE_SHIFT PAGE_SHIFT
 #define Y_GET_DENTRY(f) ((f)->f_path.dentry)
 #define page_cache_release put_page
 #define YAFFS_NEW_XATTR 1
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
 #define YAFFS_NEW_GET_LINK 1
+#endif
 #else
 #define Y_GET_DENTRY(f) ((f)->f_dentry)
 #define YAFFS_NEW_XATTR 0
