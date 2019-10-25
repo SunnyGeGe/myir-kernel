@@ -782,23 +782,23 @@
 		};
 		partition@10 {
 			label = "NAND.kernel";
-			reg = <0x00400000 0x02000000>;
+			reg = <0x00400000 0x00800000>;
 		};
 		partition@11 {
 			label = "NAND.kernel.backup1";
-			reg = <0x02400000 0x02000000>;
+			reg = <0x00c00000 0x00800000>;
 		};
 		partition@12 {
 			label = "NAND.recovery";
-			reg = <0x04400000 0x02000000>;
+			reg = <0x01400000 0x02000000>;
 		};
 		partition@13 {
 			label = "NAND.rootfs";
-			reg = <0x06400000 0x02800000>;
+			reg = <0x03400000 0x04000000>;
 		};
 		partition@14 {
 			label = "NAND.rootfs.backup1";
-			reg = <0x08c00000 0x02800000>;
+			reg = <0x07400000 0x04000000>;
 		};
 		partition@15 {
 			label = "NAND.overlay";
