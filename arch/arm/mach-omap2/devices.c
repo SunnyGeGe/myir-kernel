@@ -1881,7 +1881,7 @@ int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
 
 	memcpy(am33xx_cpsw_pdata.mac_addr,
 			am33xx_cpsw_slaves[0].mac_addr, ETH_ALEN);
-
+#ifdef CONFIG_TI_DAVINCI_MDIO
 	oh = omap_hwmod_lookup("mdio");
 	if (!oh) {
 		pr_err("could not find cpgmac0 hwmod data\n");
@@ -1892,7 +1892,7 @@ int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
 			sizeof(am33xx_cpsw_mdiopdata), NULL, 0, 0);
 	if (IS_ERR(pdev))
 		pr_err("could not build omap_device for cpsw\n");
-
+#endif
 	oh = omap_hwmod_lookup("cpgmac0");
 	if (!oh) {
 		pr_err("could not find cpgmac0 hwmod data\n");

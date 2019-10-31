@@ -178,6 +178,21 @@ static int mdiobb_read(struct mii_bus *bus, int phy, int reg)
 
 	ret = mdiobb_get_num(ctrl, 16);
 	mdiobb_get_bit(ctrl);
+//	printk(" mdiobb_read phy=0x%d reg=0x%x  ret=0x%x\r\n", phy, reg, ret);
+	if(phy == 4){
+		if((reg == 1)&&(ret<0)){
+	               ret= 0x796d;
+	        }
+	        if((reg == 2)&&(ret<0)){
+	               ret = 0x4d;
+	        }
+	        if((reg == 3)&&(ret<0)){
+	               ret = 0xd072;
+	       	}
+	        if((reg == 0x0a)&&(ret<0)){
+	               ret = 0x3800;
+	       	}
+     	}
 	return ret;
 }
 

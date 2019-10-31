@@ -39,6 +39,7 @@
 #include <linux/platform_data/ti_adc.h>
 #include <linux/mfd/ti_tscadc.h>
 #include <linux/input/ti_tsc.h>
+#include <linux/mdio-gpio.h>
 
 #include <linux/reboot.h>
 #include <linux/pwm/pwm.h>
@@ -462,8 +463,13 @@ static struct pinmux_config rgmii1_pin_mux[] = {
 	{"mii1_rxd2.rgmii1_rd2", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLDOWN},
 	{"mii1_rxd1.rgmii1_rd1", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLDOWN},
 	{"mii1_rxd0.rgmii1_rd0", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLDOWN},
+#ifdef CONFIG_MDIO_GPIO
+	{"mdio_data.gpio0_0", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+	{"mdio_clk.gpio0_1", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT_PULLUP},
+#else
 	{"mdio_data.mdio_data", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
 	{"mdio_clk.mdio_clk", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT_PULLUP},
+#endif
 	{NULL, 0},
 };
 
@@ -481,8 +487,13 @@ static struct pinmux_config rgmii2_pin_mux[] = {
 	{"gpmc_a9.rgmii2_rd2", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLDOWN},
 	{"gpmc_a10.rgmii2_rd1", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLDOWN},
 	{"gpmc_a11.rgmii2_rd0", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLDOWN},
+#ifdef CONFIG_MDIO_GPIO
+	{"mdio_data.gpio0_0", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+	{"mdio_clk.gpio0_1", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT_PULLUP},
+#else
 	{"mdio_data.mdio_data", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
 	{"mdio_clk.mdio_clk", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT_PULLUP},
+#endif
 	{NULL, 0},
 };
 
@@ -1190,10 +1201,33 @@ static void myir_wdt_init(int evm_id, int profile)
         platform_device_register(&myir_wdt_device);
 }
 #endif /* CONFIG_MYIR_WDT */
+#ifdef CONFIG_MDIO_GPIO
+static struct mdio_gpio_platform_data mdio_gpio_data = {
+	.mdc = 1,
+	.mdio = 0,
+	.phy_mask = 0xffffffaf,
+};
+
+static struct platform_device mdio_gpio_device = {
+    .name = "mdio-gpio",
+    .id = 0,
+    .dev = {
+        .platform_data = &mdio_gpio_data,
+    },
+};
+
+static void mdio_gpio_init(int evm_id, int profile)
+{
+	platform_device_register(&mdio_gpio_device);
+}
+#endif
 
 static struct evm_dev_cfg myd_am335x_dev_cfg[] = {
 	{evm_nand_init, DEV_ON_BASEBOARD, PROFILE_ALL},
 	{mmc0_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
+#ifdef CONFIG_MDIO_GPIO
+	{mdio_gpio_init, DEV_ON_BASEBOARD, PROFILE_ALL},
+#endif
 	{rgmii1_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
 	{rgmii2_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
 	{display_init,     DEV_ON_BASEBOARD, PROFILE_ALL},
