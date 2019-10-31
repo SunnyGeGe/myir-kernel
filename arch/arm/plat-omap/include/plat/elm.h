@@ -27,7 +27,26 @@ enum omap_bch_ecc {
 #define BCH_MAX_ECC_BYTES_PER_SECTOR	(28)
 #define BCH8_ECC_MAX	((BCH8_ECC_BYTES + BCH8_ECC_OOB_BYTES) * 8)
 
-int omap_elm_decode_bch_error(int bch_type, char *ecc_calc,
-		unsigned int *err_loc);
-void omap_configure_elm(struct mtd_info *mtdi, int bch_type);
+/* ELM support 8 error syndrome process */
+#define ERROR_VECTOR_MAX		8
+
+/**
+ * struct elm_errorvec - error vector for elm
+ * @error_reported:		set true for vectors error is reported
+ * @error_uncorrectable:	number of uncorrectable errors
+ * @error_count:		number of correctable errors in the sector
+ * @error_loc:			buffer for error location
+ *
+ */
+struct elm_errorvec {
+	bool error_reported;
+	bool error_uncorrectable;
+	int error_count;
+	int error_loc[16];
+};
+
+int omap_elm_decode_bch_error(int bch_type , char *ecc_calc,
+		struct elm_errorvec *err_vec);
+void omap_configure_elm(struct mtd_info *mtdi, int bch_type,
+	int ecc_steps, int ecc_step_size, int ecc_syndrome_size);
 #endif /* OMAP_ELM_H */

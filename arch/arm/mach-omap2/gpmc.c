@@ -945,9 +945,9 @@ int gpmc_enable_hwecc(int ecc_type, int cs, int mode,
 			bch_mod = 0;
 			bch_wrapmode = 0x06;
 		} else if (ecc_type == OMAP_ECC_BCH8_CODE_HW) {
-			eccsize1 = 0x1c; eccsize0 = 0x00;
+			eccsize1 = 0x20; eccsize0 = 0x00;
 			bch_mod = 1;
-			bch_wrapmode = 0x01;
+			bch_wrapmode = 0x06;
 		} else
 			eccsize1 = ((ecc_size >> 1) - 1);
 		break;
@@ -963,7 +963,7 @@ int gpmc_enable_hwecc(int ecc_type, int cs, int mode,
 		ecc_size_conf_val = (eccsize1 << 22) | (eccsize0 << 12);
 		ecc_conf_val = ((0x01 << 16) | (bch_mod << 12)
 			| (bch_wrapmode << 8) | (dev_width << 7)
-			| (0x00 << 4) | (cs << 1) | (0x1));
+			| (0x03 << 4) | (cs << 1) | (0x1));
 	} else {
 		gpmc_write_reg(GPMC_ECC_CONTROL, 0x00000101);
 		ecc_size_conf_val = (eccsize1 << 22) | 0x0000000F;
@@ -991,50 +991,78 @@ EXPORT_SYMBOL(gpmc_enable_hwecc);
  * ECC bytes that has to be dealt with separately.
  */
 int gpmc_calculate_ecc(int ecc_type, int cs,
-		const u_char *dat, u_char *ecc_code)
+		const u_char *dat, u_char *ecc_calc)
 {
-	unsigned int reg;
-	unsigned int val1 = 0x0, val2 = 0x0;
-	unsigned int val3 = 0x0, val4 = 0x0;
+	u8 *ecc_code;
+	unsigned long nsectors, bch_val1, bch_val2, bch_val3, bch_val4;
+	u32 val;
+	u32 reg;
 	int i;
+ 	int eccbytes	= 14;
+	
+	val = gpmc_read_reg(GPMC_ECC_CONFIG);
+ 	nsectors = ((val >> 4) & 0x7) + 1;
+	for (i = 0; i < nsectors; i++) {
+		ecc_code = ecc_calc;
+		reg =  GPMC_ECC_BCH_RESULT_0 + (0x10 * i);
+		switch (ecc_type) {
+		case OMAP_ECC_BCH8_CODE_HW:
+			bch_val1 = gpmc_read_reg(reg);
+			bch_val2 = gpmc_read_reg(reg+4);
+			bch_val3 = gpmc_read_reg(reg+8);
+			bch_val4 = gpmc_read_reg(reg+12);
+			*ecc_code++ = (bch_val4 & 0xFF);
+			*ecc_code++ = ((bch_val3 >> 24) & 0xFF);
+			*ecc_code++ = ((bch_val3 >> 16) & 0xFF);
+			*ecc_code++ = ((bch_val3 >> 8) & 0xFF);
+			*ecc_code++ = (bch_val3 & 0xFF);
+			*ecc_code++ = ((bch_val2 >> 24) & 0xFF);
+			*ecc_code++ = ((bch_val2 >> 16) & 0xFF);
+			*ecc_code++ = ((bch_val2 >> 8) & 0xFF);
+			*ecc_code++ = (bch_val2 & 0xFF);
+			*ecc_code++ = ((bch_val1 >> 24) & 0xFF);
+			*ecc_code++ = ((bch_val1 >> 16) & 0xFF);
+			*ecc_code++ = ((bch_val1 >> 8) & 0xFF);
+			*ecc_code++ = (bch_val1 & 0xFF);
+			break;
+		case OMAP_ECC_BCH4_CODE_HW:
+			bch_val1 = gpmc_read_reg(reg);
+			bch_val2 = gpmc_read_reg(reg+4);
 
-	if ((ecc_type == OMAP_ECC_BCH4_CODE_HW) ||
-		(ecc_type == OMAP_ECC_BCH8_CODE_HW)) {
-		for (i = 0; i < 1; i++) {
-			/*
-			 * Reading HW ECC_BCH_Results
-			 * 0x240-0x24C, 0x250-0x25C, 0x260-0x26C, 0x270-0x27C
-			 */
-			reg =  GPMC_ECC_BCH_RESULT_0 + (0x10 * i);
-			val1 = gpmc_read_reg(reg);
-			val2 = gpmc_read_reg(reg + 4);
-			if (ecc_type == OMAP_ECC_BCH8_CODE_HW) {
-				val3 = gpmc_read_reg(reg + 8);
-				val4 = gpmc_read_reg(reg + 12);
-
-				*ecc_code++ = (val4 & 0xFF);
-				*ecc_code++ = ((val3 >> 24) & 0xFF);
-				*ecc_code++ = ((val3 >> 16) & 0xFF);
-				*ecc_code++ = ((val3 >> 8) & 0xFF);
-				*ecc_code++ = (val3 & 0xFF);
-				*ecc_code++ = ((val2 >> 24) & 0xFF);
-			}
-			*ecc_code++ = ((val2 >> 16) & 0xFF);
-			*ecc_code++ = ((val2 >> 8) & 0xFF);
-			*ecc_code++ = (val2 & 0xFF);
-			*ecc_code++ = ((val1 >> 24) & 0xFF);
-			*ecc_code++ = ((val1 >> 16) & 0xFF);
-			*ecc_code++ = ((val1 >> 8) & 0xFF);
-			*ecc_code++ = (val1 & 0xFF);
+			*ecc_code++ = ((bch_val2 >> 12) & 0xFF);
+			*ecc_code++ = ((bch_val2 >> 4) & 0xFF);
+			*ecc_code++ = ((bch_val2 & 0xF) << 4) |
+				((bch_val1 >> 28) & 0xF);
+			*ecc_code++ = ((bch_val1 >> 20) & 0xFF);
+			*ecc_code++ = ((bch_val1 >> 12) & 0xFF);
+			*ecc_code++ = ((bch_val1 >> 4) & 0xFF);
+			*ecc_code++ = ((bch_val1 & 0xF) << 4);
+			break;
+		default:
+			return -EINVAL;
 		}
-	} else {
-		/* read ecc result */
-		val1 = gpmc_read_reg(GPMC_ECC1_RESULT);
-		*ecc_code++ = val1;          /* P128e, ..., P1e */
-		*ecc_code++ = val1 >> 16;    /* P128o, ..., P1o */
-		/* P2048o, P1024o, P512o, P256o, P2048e, P1024e, P512e, P256e */
-		*ecc_code++ = ((val1 >> 8) & 0x0f) | ((val1 >> 20) & 0xf0);
+
+		/* ECC scheme specific syndrome customizations */
+		switch (ecc_type) {
+		case OMAP_ECC_BCH4_CODE_HW:
+			eccbytes = 8;
+			/* Set  8th ECC byte as 0x0 for ROM compatibility */
+			ecc_code[eccbytes - 1] = 0x0;
+			break;
+		case OMAP_ECC_BCH8_CODE_HW:
+			/* Set 14th ECC byte as 0x0 for ROM compatibility */
+			eccbytes = 14;
+			ecc_code[eccbytes - 1] = 0x0;
+			break;
+
+		default:
+			return -EINVAL;
+		}
+
+	ecc_calc += eccbytes;
 	}
+
 	return 0;
+
 }
 EXPORT_SYMBOL(gpmc_calculate_ecc);

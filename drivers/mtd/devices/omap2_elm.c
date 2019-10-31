@@ -115,10 +115,34 @@
 
 #define DRIVER_NAME	"omap2_elm"
 
+#define SYNDROME_FRAGMENT_REG_SIZE	0x40
+#define ERROR_LOCATION_SIZE		0x100
+
+struct elm_registers {
+	u32 elm_irqenable;
+	u32 elm_sysconfig;
+	u32 elm_location_config;
+	u32 elm_page_ctrl;
+	u32 elm_syndrome_fragment_6[ERROR_VECTOR_MAX];
+	u32 elm_syndrome_fragment_5[ERROR_VECTOR_MAX];
+	u32 elm_syndrome_fragment_4[ERROR_VECTOR_MAX];
+	u32 elm_syndrome_fragment_3[ERROR_VECTOR_MAX];
+	u32 elm_syndrome_fragment_2[ERROR_VECTOR_MAX];
+	u32 elm_syndrome_fragment_1[ERROR_VECTOR_MAX];
+	u32 elm_syndrome_fragment_0[ERROR_VECTOR_MAX];
+};
+
+
 static void  __iomem *elm_base;
+static struct list_head list;
 static struct completion elm_completion;
 static struct mtd_info *mtd;
-static int bch_scheme;
+static	enum omap_bch_ecc g_bch_type;
+static	struct elm_registers elm_regs;
+static	int g_ecc_steps;
+static	int g_ecc_syndrome_size;
+
+static LIST_HEAD(elm_devices);
 
 static void elm_write_reg(int idx, u32 val)
 {
@@ -142,20 +166,7 @@ void omap_elm_config(int bch_type)
 	reg_val = (bch_type & ECC_BCH_LEVEL_MASK) | (buffer_size << 16);
 	elm_write_reg(ELM_LOCATION_CONFIG, reg_val);
 
-	/* clearing interrupts */
-	reg_val = elm_read_reg(ELM_IRQSTATUS);
-	elm_write_reg(ELM_IRQSTATUS, reg_val & INTR_STATUS_LOC_VALID_0);
-	elm_write_reg(ELM_IRQSTATUS, INTR_STATUS_LOC_VALID_0);
 
-	/* enable in interrupt mode */
-	reg_val = elm_read_reg(ELM_IRQENABLE);
-	reg_val |= INTR_EN_LOCATION_MASK_0;
-	elm_write_reg(ELM_IRQENABLE, reg_val);
-
-	/* config in Continuous mode */
-	reg_val = elm_read_reg(ELM_PAGE_CTRL);
-	reg_val &= ~PAGE_MODE_SECTOR_0;
-	elm_write_reg(ELM_PAGE_CTRL, reg_val);
 }
 
 /**
@@ -165,85 +176,224 @@ void omap_elm_config(int bch_type)
  *
  * Configures the ELM module to support BCH error correction
  */
-void omap_configure_elm(struct mtd_info *mtd_info, int bch_type)
+void omap_configure_elm(struct mtd_info *mtd_info, int bch_type,
+	int ecc_steps, int ecc_step_size, int ecc_syndrome_size)
 {
+	/* ELM cannot detect ECC errors for chunks > 1KB */
+	if (ecc_step_size > ((OMAP_ECC_SIZE + 1) / 2)) {
+		printk("unsupported config ecc-size=%d\n", ecc_step_size);
+	}
+	/* ELM support 8 error syndrome process */
+	if (ecc_steps > ERROR_VECTOR_MAX) {
+		printk("unsupported config ecc-step=%d\n", ecc_steps);
+	}
 	omap_elm_config(bch_type);
 	mtd = mtd_info;
-	bch_scheme = bch_type;
+	g_bch_type		= bch_type;
+	g_ecc_steps		= ecc_steps;
+	g_ecc_syndrome_size	= ecc_syndrome_size;
 }
 EXPORT_SYMBOL(omap_configure_elm);
 
 /**
- * omap_elm_load_syndrome - Load ELM syndrome reg
- * @bch_type:	type of BCH ECC scheme
- * @syndrome:	Syndrome polynomial
+ * elm_configure_page_mode - Enable/Disable page mode
+ * @info:	elm info
+ * @index:	index number of syndrome fragment vector
+ * @enable:	enable/disable flag for page mode
  *
- * Load the syndrome polynomial to syndrome registers
+ * Enable page mode for syndrome fragment index
  */
-void omap_elm_load_syndrome(int bch_type, char *syndrome)
+static void elm_configure_page_mode(int index,
+		bool enable)
 {
-	int reg_val;
-	int i;
+	u32 reg_val;
+
+	reg_val = elm_read_reg(ELM_PAGE_CTRL);
+	if (enable)
+		reg_val |= BIT(index);	/* enable page mode */
+	else
+		reg_val &= ~BIT(index);	/* disable page mode */
+
+	elm_write_reg(ELM_PAGE_CTRL, reg_val);
+}
+
+/**
+ * elm_load_syndrome - Load ELM syndrome reg
+ * @info:	elm info
+ * @err_vec:	elm error vectors
+ * @ecc:	buffer with calculated ecc
+ *
+ * Load syndrome fragment registers with calculated ecc in reverse order.
+ */
+static void elm_load_syndrome(struct elm_errorvec *err_vec, u8 *ecc)
+{
+	int i, offset;
+	u32 val;
 
 	for (i = 0; i < 4; i++) {
-		reg_val = syndrome[0] | syndrome[1] << 8 |
-			syndrome[2] << 16 | syndrome[3] << 24;
-		elm_write_reg(ELM_SYNDROME_FRAGMENT_0 + i * 4, reg_val);
-		syndrome += 4;
-	}
-}
 
-/**
- * omap_elm_start_processing - Start calculting error location
- */
-void omap_elm_start_processing(void)
-{
-	u32 reg_val;
+		/* Check error reported */
+		if (err_vec[i].error_reported) {
+			elm_configure_page_mode(i, true);
+			offset = ELM_SYNDROME_FRAGMENT_0 +
+				SYNDROME_FRAGMENT_REG_SIZE * i;
+			switch (g_bch_type) {
+			case OMAP_BCH8_ECC:
+				/* syndrome fragment 0 = ecc[9-12B] */
+				val = cpu_to_be32(*(u32 *) &ecc[9]);
+				elm_write_reg(offset, val);
+				/* syndrome fragment 1 = ecc[5-8B] */
+				offset += 4;
+				val = cpu_to_be32(*(u32 *) &ecc[5]);
+				elm_write_reg(offset, val);
+				/* syndrome fragment 2 = ecc[1-4B] */
+				offset += 4;
+				val = cpu_to_be32(*(u32 *) &ecc[1]);
+				elm_write_reg(offset, val);
+				/* syndrome fragment 3 = ecc[0B] */
+				offset += 4;
+				val = ecc[0];
+				elm_write_reg(offset, val);
+				break;
+			case OMAP_BCH4_ECC:
+				/* syndrome fragment 0 = ecc[20-52b] bits */
+				val = (cpu_to_be32(*(u32 *) &ecc[3]) >> 4) |
+					((ecc[2] & 0xf) << 28);
+				elm_write_reg(offset, val);
 
-	reg_val = elm_read_reg(ELM_SYNDROME_FRAGMENT_6);
-	reg_val |= ELM_SYNDROME_VALID;
-	elm_write_reg(ELM_SYNDROME_FRAGMENT_6, reg_val);
-}
-
-void rotate_ecc_bytes(u8 *src, u8 *dst)
-{
-	int i;
-
-	for (i = 0; i < BCH8_ECC_OOB_BYTES; i++)
-		dst[BCH8_ECC_OOB_BYTES - 1 - i] = src[i];
-}
-
-/**
- * omap_elm_decode_bch_error - Locate error pos
- * @bch_type:	Type of BCH ECC scheme
- * @ecc_calc:	Calculated ECC bytes from GPMC
- * @err_loc:	Error location bytes
- */
-int omap_elm_decode_bch_error(int bch_type, char *ecc_calc,
-		unsigned int *err_loc)
-{
-	u8 ecc_data[BCH_MAX_ECC_BYTES_PER_SECTOR] = {0};
-	u32 reg_val;
-	int i, err_no;
-
-	rotate_ecc_bytes(ecc_calc, ecc_data);
-	omap_elm_load_syndrome(bch_type, ecc_data);
-	omap_elm_start_processing();
-	wait_for_completion(&elm_completion);
-	reg_val = elm_read_reg(ELM_LOCATION_STATUS);
-
-	if (reg_val & ECC_CORRECTABLE_MASK) {
-		err_no = reg_val & ECC_NB_ERRORS_MASK;
-
-		for (i = 0; i < err_no; i++) {
-			reg_val = elm_read_reg(ELM_ERROR_LOCATION_0 + i * 4);
-			err_loc[i] = reg_val;
+				/* syndrome fragment 1 = ecc[0-20b] bits */
+				offset += 4;
+				val = cpu_to_be32(*(u32 *) &ecc[0]) >> 12;
+				elm_write_reg(offset, val);
+				break;
+			default:
+				pr_err("invalid config bch_type\n");
+			}
 		}
 
-		return err_no;
+		/* Update ecc pointer with ecc byte size */
+		ecc += g_ecc_syndrome_size;
 	}
+}
 
-	return -EINVAL;
+/**
+ * elm_start_processing - start elm syndrome processing
+ * @info:	elm info
+ * @err_vec:	elm error vectors
+ *
+ * Set syndrome valid bit for syndrome fragment registers for which
+ * elm syndrome fragment registers are loaded. This enables elm module
+ * to start processing syndrome vectors.
+ */
+static void elm_start_processing(struct elm_errorvec *err_vec)
+{
+	int i, offset;
+	u32 reg_val;
+
+	/*
+	 * Set syndrome vector valid, so that ELM module
+	 * will process it for vectors error is reported
+	 */
+	for (i = 0; i < 4; i++) {
+		if (err_vec[i].error_reported) {
+			offset = ELM_SYNDROME_FRAGMENT_6 +
+				SYNDROME_FRAGMENT_REG_SIZE * i;
+			reg_val = elm_read_reg(offset);
+			reg_val |= ELM_SYNDROME_VALID;
+			elm_write_reg(offset, reg_val);
+		}
+	}
+}
+
+/**
+ * elm_error_correction - locate correctable error position
+ * @err_vec:	elm error vectors
+ *
+ * On completion of processing by elm module, error location status
+ * register updated with correctable/uncorrectable error information.
+ * In case of correctable errors, number of errors located from
+ * elm location status register & read the positions from
+ * elm error location register.
+ */
+static void elm_error_correction(struct elm_errorvec *err_vec)
+{
+	int i, j, errors = 0;
+	int offset;
+	u32 reg_val;
+
+	for (i = 0; i < 4; i++) {
+
+		/* Check error reported */
+		if (err_vec[i].error_reported) {
+			offset = ELM_LOCATION_STATUS + ERROR_LOCATION_SIZE * i;
+			reg_val = elm_read_reg(offset);
+
+			/* Check correctable error or not */
+			if (reg_val & ECC_CORRECTABLE_MASK) {
+				offset = ELM_ERROR_LOCATION_0 +
+					ERROR_LOCATION_SIZE * i;
+
+				/* Read count of correctable errors */
+				err_vec[i].error_count = reg_val &
+					ECC_NB_ERRORS_MASK;
+
+				/* Update the error locations in error vector */
+				for (j = 0; j < err_vec[i].error_count; j++) {
+
+					reg_val = elm_read_reg(offset);
+					err_vec[i].error_loc[j] = reg_val &
+						ECC_ERROR_LOCATION_MASK;
+
+					/* Update error location register */
+					offset += 4;
+				}
+
+				errors += err_vec[i].error_count;
+			} else {
+				err_vec[i].error_uncorrectable = true;
+			}
+
+			/* Clearing interrupts for processed error vectors */
+			elm_write_reg(ELM_IRQSTATUS, BIT(i));
+
+			/* Disable page mode */
+			elm_configure_page_mode(i, false);
+		}
+	}
+}
+
+/**
+ * omap_elm_decode_bch_error - Locate error position
+ * @ecc_calc:	calculated ECC bytes from GPMC
+ * @err_vec:	elm error vectors
+ *
+ * Called with one or more error reported vectors & vectors with
+ * error reported is updated in err_vec[].error_reported
+ */
+int omap_elm_decode_bch_error(int bch_type , char *ecc_calc,
+		struct elm_errorvec *err_vec)
+{
+	u32 reg_val;
+
+	/* Enable page mode interrupt */
+	reg_val = elm_read_reg(ELM_IRQSTATUS);
+	elm_write_reg(ELM_IRQSTATUS, reg_val & INTR_STATUS_PAGE_VALID);
+	elm_write_reg(ELM_IRQENABLE, INTR_EN_PAGE_MASK);
+	/* Load valid ecc byte to syndrome fragment register */
+	elm_load_syndrome(err_vec, ecc_calc);
+
+	/* Enable syndrome processing for which syndrome fragment is updated */
+	elm_start_processing(err_vec);
+
+	/* Wait for ELM module to finish locating error correction */
+	wait_for_completion(&elm_completion);
+
+	/* Disable page mode interrupt */
+	reg_val = elm_read_reg(ELM_IRQENABLE);
+	elm_write_reg(ELM_IRQENABLE, reg_val & ~INTR_EN_PAGE_MASK);
+	elm_error_correction(err_vec);
+	
+	return 0;
 }
 EXPORT_SYMBOL(omap_elm_decode_bch_error);
 
@@ -253,8 +403,10 @@ static irqreturn_t omap_elm_isr(int this_irq, void *dev_id)
 
 	reg_val = elm_read_reg(ELM_IRQSTATUS);
 
-	if (reg_val & INTR_STATUS_LOC_VALID_0) {
-		elm_write_reg(ELM_IRQSTATUS, reg_val & INTR_STATUS_LOC_VALID_0);
+	/* All error vectors processed */
+	if (reg_val & INTR_STATUS_PAGE_VALID) {
+		elm_write_reg(ELM_IRQSTATUS,
+				reg_val & INTR_STATUS_PAGE_VALID);
 		complete(&elm_completion);
 		return IRQ_HANDLED;
 	}
@@ -264,48 +416,56 @@ static irqreturn_t omap_elm_isr(int this_irq, void *dev_id)
 
 static int omap_elm_probe(struct platform_device *pdev)
 {
-	int  ret_status = 0;
-	struct resource *res = NULL, *irq = NULL;
+	int ret = 0;
+	struct resource *res, *irq;
 
 	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 
 	if (irq == NULL)
+	{
+		dev_err(&pdev->dev, "no irq resource defined\n");
 		return -EINVAL;
+	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	if (res == NULL)
-		return -EINVAL;
+	{
+			dev_err(&pdev->dev, "no mem resource defined\n");
+			return -EINVAL;
+	}
 
 	if (!request_mem_region(res->start, resource_size(res),
 				dev_name(&pdev->dev)))
 		return -EBUSY;
 
-	elm_base = ioremap(res->start, resource_size(res));
+	elm_base =  ioremap(res->start, resource_size(res));
 
 	if (!elm_base) {
 		dev_dbg(&pdev->dev, "can't ioremap\n");
-		ret_status = -ENOMEM;
+		ret = -ENOMEM;
 		goto err_remap;
 	}
 
 	pm_runtime_enable(&pdev->dev);
 	if (pm_runtime_get_sync(&pdev->dev)) {
-		ret_status = -EINVAL;
+		ret = -EINVAL;
 		dev_dbg(&pdev->dev, "can't enable clock\n");
 		goto err_clk;
 	}
 
-	ret_status = request_irq(irq->start, omap_elm_isr, 0, pdev->name,
+	ret = request_irq(irq->start, omap_elm_isr, 0, pdev->name,
 			&pdev->dev);
 
-	if (ret_status) {
+	if (ret) {
 		pr_err("failure requesting irq %i\n", irq->start);
 		goto err_irq;
 	}
 
 	init_completion(&elm_completion);
-	return ret_status;
+	INIT_LIST_HEAD(&list);
+	list_add(&list, &elm_devices);
+	return ret;
 
 err_irq:
 	pm_runtime_put_sync(&pdev->dev);
@@ -314,7 +474,7 @@ err_clk:
 	iounmap(elm_base);
 err_remap:
 	release_mem_region(res->start, resource_size(res));
-	return ret_status;
+	return ret;
 }
 
 static int omap_elm_remove(struct platform_device *pdev)
@@ -333,10 +493,90 @@ static int omap_elm_remove(struct platform_device *pdev)
 
 
 #ifdef CONFIG_PM
-static int omap_elm_suspend(struct platform_device *pdev, pm_message_t state)
+/**
+ * elm_context_save
+ * saves ELM configurations to preserve them across Hardware powered-down
+ */
+static int elm_context_save()
 {
-	if (mtd && mtd->suspend)
-		mtd->suspend(mtd);
+
+	u32 offset = 0, i;
+
+	elm_regs.elm_irqenable       = elm_read_reg(ELM_IRQENABLE);
+	elm_regs.elm_sysconfig       = elm_read_reg(ELM_SYSCONFIG);
+	elm_regs.elm_location_config = elm_read_reg(ELM_LOCATION_CONFIG);
+	elm_regs.elm_page_ctrl       = elm_read_reg(ELM_PAGE_CTRL);
+	for (i = 0; i < ERROR_VECTOR_MAX; i++) {
+		offset = i * SYNDROME_FRAGMENT_REG_SIZE;
+		switch (g_bch_type) {
+		case OMAP_BCH16_ECC:
+			elm_regs.elm_syndrome_fragment_6[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_6 + offset);
+			elm_regs.elm_syndrome_fragment_5[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_5 + offset);
+			elm_regs.elm_syndrome_fragment_4[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_4 + offset);
+		case OMAP_BCH8_ECC:
+			elm_regs.elm_syndrome_fragment_3[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_3 + offset);
+			elm_regs.elm_syndrome_fragment_2[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_2 + offset);
+		case OMAP_BCH4_ECC:
+			elm_regs.elm_syndrome_fragment_1[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_1 + offset);
+			elm_regs.elm_syndrome_fragment_0[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_0 + offset);
+			break;
+		default:
+			return -EINVAL;
+		}
+		/* ELM SYNDROME_VALID bit in SYNDROME_FRAGMENT_6[] needs
+		 * to be saved for all BCH schemes*/
+		elm_regs.elm_syndrome_fragment_6[i] = elm_read_reg(ELM_SYNDROME_FRAGMENT_6 + offset);
+	}
+	return 0;
+}
+
+/**
+ * elm_context_restore
+ * writes configurations saved duing power-down back into ELM registers
+ */
+static int elm_context_restore()
+{
+	u32 offset = 0, i;
+
+	elm_write_reg(ELM_IRQENABLE,	 elm_regs.elm_irqenable);
+	elm_write_reg(ELM_SYSCONFIG,	 elm_regs.elm_sysconfig);
+	elm_write_reg(ELM_LOCATION_CONFIG, elm_regs.elm_location_config);
+	elm_write_reg(ELM_PAGE_CTRL,	 elm_regs.elm_page_ctrl);
+	for (i = 0; i < ERROR_VECTOR_MAX; i++) {
+		offset = i * SYNDROME_FRAGMENT_REG_SIZE;
+		switch (g_bch_type) {
+		case OMAP_BCH16_ECC:
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_6 + offset,
+					elm_regs.elm_syndrome_fragment_6[i]);
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_5 + offset,
+					elm_regs.elm_syndrome_fragment_5[i]);
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_4 + offset,
+					elm_regs.elm_syndrome_fragment_4[i]);
+		case OMAP_BCH8_ECC:
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_3 + offset,
+					elm_regs.elm_syndrome_fragment_3[i]);
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_2 + offset,
+					elm_regs.elm_syndrome_fragment_2[i]);
+		case OMAP_BCH4_ECC:
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_1 + offset,
+					elm_regs.elm_syndrome_fragment_1[i]);
+			elm_write_reg(ELM_SYNDROME_FRAGMENT_0 + offset,
+					elm_regs.elm_syndrome_fragment_0[i]);
+			break;
+		default:
+			return -EINVAL;
+		}
+		/* ELM_SYNDROME_VALID bit to be set in last to trigger FSM */
+		elm_write_reg(ELM_SYNDROME_FRAGMENT_6 + offset,
+					elm_regs.elm_syndrome_fragment_6[i] &
+							 ELM_SYNDROME_VALID);
+	}
+	return 0;
+}
+
+static int omap_elm_suspend(struct platform_device *pdev)
+{
+	elm_context_save();
 	pm_runtime_put_sync(&pdev->dev);
 	return 0;
 }
@@ -344,8 +584,7 @@ static int omap_elm_suspend(struct platform_device *pdev, pm_message_t state)
 static int omap_elm_resume(struct platform_device *pdev)
 {
 	pm_runtime_get_sync(&pdev->dev);
-	/* Restore ELM context by configuring */
-	omap_elm_config(bch_scheme);
+	elm_context_restore();
 	return 0;
 }
 #endif

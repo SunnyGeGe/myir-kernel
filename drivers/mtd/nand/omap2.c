@@ -103,6 +103,10 @@
 #define BCH_JFFS2_CLEAN_MARKER_OFFSET	0x3a
 #define OMAP_BCH8_ECC_SECT_BYTES	14
 
+static u_char bch8_vector[] = {0xf3, 0xdb, 0x14, 0x16, 0x8b, 0xd2, 0xbe, 0xcc,
+	0xac, 0x6b, 0xff, 0x99, 0x7b};
+static u_char bch4_vector[] = {0x00, 0x6b, 0x31, 0xdd, 0x41, 0xbc, 0x10};
+
 /* oob info generated runtime depending on ecc algorithm and layout selected */
 static struct nand_ecclayout omap_oobinfo;
 /* Define some generic bad / good block scan pattern which are used
@@ -794,6 +798,46 @@ static int omap_compare_ecc(u8 *ecc_data1,	/* read from NAND memory */
 }
 
 /**
+ * erased_sector_bitflips - count bit flips
+ * @data:	data sector buffer
+ * @oob:	oob buffer
+ * @info:	omap_nand_info
+ *
+ * Check the bit flips in erased page falls below correctable level.
+ * If falls below, report the page as erased with correctable bit
+ * flip, else report as uncorrectable page.
+ */
+static int erased_sector_bitflips(u_char *data, u_char *oob,
+		struct omap_nand_info *info)
+{
+	int flip_bits = 0, i;
+
+	for (i = 0; i < info->nand.ecc.size; i++) {
+		flip_bits += hweight8(~data[i]);
+		if (flip_bits > 8)
+			return 0;
+	}
+
+	for (i = 0; i < info->nand.ecc.bytes - 1; i++) {
+		flip_bits += hweight8(~oob[i]);
+		if (flip_bits > 8)
+			return 0;
+	}
+
+	/*
+	 * Bit flips falls in correctable level.
+	 * Fill data area with 0xFF
+	 */
+	if (flip_bits) {
+		memset(data, 0xFF, info->nand.ecc.size);
+		memset(oob, 0xFF, info->nand.ecc.bytes);
+	}
+
+	return flip_bits;
+}
+
+
+/**
  * omap_read_page_bch - BCH ecc based page read function
  * @mtd:	mtd info structure
  * @chip:	nand chip info structure
@@ -806,59 +850,32 @@ static int omap_compare_ecc(u8 *ecc_data1,	/* read from NAND memory */
 static int omap_read_page_bch(struct mtd_info *mtd, struct nand_chip *chip,
 				uint8_t *buf, int page)
 {
-	int i, eccsize = chip->ecc.size;
-	int eccbytes = chip->ecc.bytes;
-	int eccsteps = chip->ecc.steps;
-	uint8_t *p = buf;
 	uint8_t *ecc_calc = chip->buffers->ecccalc;
 	uint8_t *ecc_code = chip->buffers->ecccode;
 	uint32_t *eccpos = chip->ecc.layout->eccpos;
 	uint8_t *oob = &chip->oob_poi[eccpos[0]];
-	uint32_t data_pos;
-	uint32_t oob_pos;
+	uint32_t oob_pos = mtd->writesize + chip->ecc.layout->eccpos[0];
+	int stat;
+	/* Enable GPMC ecc engine */
+	chip->ecc.hwctl(mtd, NAND_ECC_READ);
 
-	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
-							mtd);
-	data_pos = 0;
-	/* oob area start */
-	oob_pos = (eccsize * eccsteps) + chip->ecc.layout->eccpos[0];
+	/* Read data */
+	chip->read_buf(mtd, buf, mtd->writesize);
 
-	for (i = 0; eccsteps; eccsteps--, i += eccbytes, p += eccsize,
-				oob += eccbytes) {
-		chip->ecc.hwctl(mtd, NAND_ECC_READ);
-		/* read data */
-		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, data_pos, page);
-		chip->read_buf(mtd, p, eccsize);
+	/* Read oob bytes */
+	chip->cmdfunc(mtd, NAND_CMD_RNDOUT, oob_pos, -1);
+	chip->read_buf(mtd, oob, chip->ecc.total);
 
-		/* read respective ecc from oob area */
-		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, oob_pos, page);
+	/* Calculate ecc bytes */
+	chip->ecc.calculate(mtd, buf, ecc_calc);
+	memcpy(ecc_code, &chip->oob_poi[eccpos[0]], chip->ecc.total);
 
-		if (info->ecc_opt == OMAP_ECC_BCH8_CODE_HW)
-			chip->read_buf(mtd, oob, 13);
-		else
-			chip->read_buf(mtd, oob, eccbytes);
-		/* read syndrome */
-		chip->ecc.calculate(mtd, p, &ecc_calc[i]);
+	stat = chip->ecc.correct(mtd, buf, ecc_code, ecc_calc);
 
-		data_pos += eccsize;
-		oob_pos += eccbytes;
-	}
-
-	for (i = 0; i < chip->ecc.total; i++)
-		ecc_code[i] = chip->oob_poi[eccpos[i]];
-
-	eccsteps = chip->ecc.steps;
-	p = buf;
-
-	for (i = 0 ; eccsteps; eccsteps--, i += eccbytes, p += eccsize) {
-		int stat;
-
-		stat = chip->ecc.correct(mtd, p, &ecc_code[i], &ecc_calc[i]);
-
-		if (stat < 0)
-			mtd->ecc_stats.failed++;
-		else
-			mtd->ecc_stats.corrected += stat;
+	if (stat < 0) {
+		mtd->ecc_stats.failed++;
+	} else {
+		mtd->ecc_stats.corrected += stat;
 	}
 	return 0;
 }
@@ -877,83 +894,194 @@ static int omap_read_page_bch(struct mtd_info *mtd, struct nand_chip *chip,
  * corrected errors is returned. If uncorrectable errors exist, %-1 is
  * returned.
  */
-static int omap_correct_data(struct mtd_info *mtd, u_char *dat,
+static int omap_correct_data(struct mtd_info *mtd, u_char *data,
 				u_char *read_ecc, u_char *calc_ecc)
 {
 	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
 							mtd);
-	int blockCnt = 0, i = 0, ret = 0;
-	int stat = 0;
-	int j, eccsize, eccflag, count;
-	unsigned int err_loc[8];
 
-	/* Ex NAND_ECC_HW12_2048 */
-	if ((info->nand.ecc.mode == NAND_ECC_HW) &&
-			(info->nand.ecc.size  == 2048))
-		blockCnt = 4;
-	else
-		blockCnt = 1;
-
+	struct nand_ecc_ctrl *ecc = &info->nand.ecc;
+	int eccsteps = info->nand.ecc.steps;
+	int i , j, stat = 0;
+	int eccflag, actual_eccbytes;
+	struct elm_errorvec err_vec[ERROR_VECTOR_MAX];
+	u_char *ecc_vec = calc_ecc;
+	u_char *spare_ecc = read_ecc;
+	u_char *erased_ecc_vec;
+	u_char *buf;
+	int bitflip_count;
+	bool is_error_reported = false;
+	u32 bit_pos, byte_pos, error_max, pos;
+	int bch_type;
+	int err;
 	switch (info->ecc_opt) {
-	case OMAP_ECC_HAMMING_CODE_HW:
-	case OMAP_ECC_HAMMING_CODE_HW_ROMCODE:
-		for (i = 0; i < blockCnt; i++) {
-			if (memcmp(read_ecc, calc_ecc, 3) != 0) {
-				ret = omap_compare_ecc(read_ecc, calc_ecc, dat);
-				if (ret < 0)
-					return ret;
-
-				/* keep track of number of corrected errors */
-				stat += ret;
-			}
-			read_ecc += 3;
-			calc_ecc += 3;
-			dat      += 512;
-		}
+	case OMAP_ECC_BCH4_CODE_HW:
+		/* omit  7th ECC byte reserved for ROM code compatibility */
+		actual_eccbytes = ecc->bytes - 1;
+		erased_ecc_vec = bch4_vector;
+		bch_type = OMAP_BCH4_ECC;
 		break;
 	case OMAP_ECC_BCH8_CODE_HW:
-		eccsize = BCH8_ECC_OOB_BYTES;
-
-		for (i = 0; i < blockCnt; i++) {
-			eccflag = 0;
-			/* check if area is flashed */
-			for (j = 0; (j < eccsize) && (eccflag == 0); j++)
-				if (read_ecc[j] != 0xFF)
-					eccflag = 1;
-
-			if (eccflag == 1) {
-				eccflag = 0;
-				/* check if any ecc error */
-				for (j = 0; (j < eccsize) && (eccflag == 0);
-						j++)
-					if (calc_ecc[j] != 0)
-						eccflag = 1;
-			}
-
-			count = 0;
-			if (eccflag == 1)
-				count  = omap_elm_decode_bch_error(0, calc_ecc,
-						err_loc);
-
-			for (j = 0; j < count; j++) {
-				u32 bit_pos, byte_pos;
-
-				bit_pos   = err_loc[j] % 8;
-				byte_pos  = (BCH8_ECC_MAX - err_loc[j] - 1) / 8;
-				if (err_loc[j] < BCH8_ECC_MAX)
-					dat[byte_pos] ^=
-							1 << bit_pos;
-				/* else, not interested to correct ecc */
-			}
-
-			stat     += count;
-			calc_ecc  = calc_ecc + OMAP_BCH8_ECC_SECT_BYTES;
-			read_ecc  = read_ecc + OMAP_BCH8_ECC_SECT_BYTES;
-			dat      += BCH8_ECC_BYTES;
-		}
+		/* omit 14th ECC byte reserved for ROM code compatibility */
+		actual_eccbytes = ecc->bytes - 1;
+		erased_ecc_vec = bch8_vector;
+		bch_type = OMAP_BCH8_ECC;
 		break;
+	default:
+		dev_err(&info->pdev->dev, "invalid driver configuration\n");
+		return -EINVAL;
 	}
-	return stat;
+
+	/* Initialize elm error vector to zero */
+	memset(err_vec, 0, sizeof(err_vec));
+	for (i = 0; i < eccsteps ; i++) {
+		eccflag = 0;	/* initialize eccflag */
+
+		/*
+		 * Check any error reported,
+		 * In case of error, non zero ecc reported.
+		 */
+		for (j = 0; j < actual_eccbytes; j++) {
+			if (calc_ecc[j] != 0) {
+				eccflag = 1; /* non zero ecc, error present */
+				break;
+			}
+		}
+
+		if (eccflag == 1) {
+			if (memcmp(calc_ecc, erased_ecc_vec,
+						actual_eccbytes) == 0) {
+				/*
+				 * calc_ecc[] matches pattern for ECC(all 0xff)
+				 * so this is definitely an erased-page
+				 */
+			} else {
+				buf = &data[info->nand.ecc.size * i];
+				/*
+				 * count number of 0-bits in read_buf.
+				 * This check can be removed once a similar
+				 * check is introduced in generic NAND driver
+				 */
+				bitflip_count = erased_sector_bitflips(
+						buf, read_ecc, info);
+				if (bitflip_count) {
+					/*
+					 * number of 0-bits within ECC limits
+					 * So this may be an erased-page
+					 */
+					stat += bitflip_count;
+				} else {
+					/*
+					 * Too many 0-bits. It may be a
+					 * - programmed-page, OR
+					 * - erased-page with many bit-flips
+					 * So this page requires check by ELM
+					 */
+					err_vec[i].error_reported = true;
+					is_error_reported = true;
+				}
+			}
+		}
+
+
+		/* Update the ecc vector */
+		calc_ecc += ecc->bytes;
+		read_ecc += ecc->bytes;
+}
+	
+	/* Check if any error reported */
+	if (!is_error_reported)
+		return stat;
+
+	/* Decode BCH error using ELM module */
+	omap_elm_decode_bch_error(bch_type, ecc_vec, err_vec);
+
+	err = 0;
+	for (i = 0; i < eccsteps; i++) {
+		if (err_vec[i].error_uncorrectable) {
+			dev_err(&info->pdev->dev,
+				"uncorrectable bit-flips found\n");
+			err = -EBADMSG;
+		} else if (err_vec[i].error_reported) {
+			for (j = 0; j < err_vec[i].error_count; j++) {
+				switch (info->ecc_opt) {
+
+				case OMAP_ECC_BCH8_CODE_HW:
+					pos = err_vec[i].error_loc[j];
+					break;
+				default:
+					return -EINVAL;
+				}
+				error_max = (ecc->size + actual_eccbytes) * 8;
+				/* Calculate bit position of error */
+				bit_pos = pos % 8;
+
+				/* Calculate byte position of error */
+				byte_pos = (error_max - pos - 1) / 8;
+
+				if (pos < error_max) {
+					if (byte_pos < 512) {
+						pr_debug("bitflip@dat[%d]=%x\n",
+						     byte_pos, data[byte_pos]);
+						data[byte_pos] ^= 1 << bit_pos;
+					} else {
+						pr_debug("bitflip@oob[%d]=%x\n",
+							(byte_pos - 512),
+						     spare_ecc[byte_pos - 512]);
+						spare_ecc[byte_pos - 512] ^=
+							1 << bit_pos;
+					}
+				} else {
+					dev_err(&info->pdev->dev,
+						"invalid bit-flip @ %d:%d\n",
+						byte_pos, bit_pos);
+					err = -EBADMSG;
+				}
+			}
+		}
+
+		/* Update number of correctable errors */
+		stat += err_vec[i].error_count;
+
+		/* Update page data with sector size */
+		data += ecc->size;
+		spare_ecc += ecc->bytes;
+	}
+
+	return (err) ? err : stat;
+}
+
+/**
+ * omap_write_page_bch - BCH ecc based write page function for entire page
+ * @mtd:		mtd info structure
+ * @chip:		nand chip info structure
+ * @buf:		data buffer
+ * @oob_required:	must write chip->oob_poi to OOB
+ *
+ * Custom write page method evolved to support multi sector writing in one shot
+ */
+static int omap_write_page_bch(struct mtd_info *mtd, struct nand_chip *chip,
+				  const uint8_t *buf/*, int oob_required*/)
+{
+	int i;
+	uint8_t *ecc_calc = chip->buffers->ecccalc;
+	uint32_t *eccpos = chip->ecc.layout->eccpos;
+
+	/* Enable GPMC ecc engine */
+	chip->ecc.hwctl(mtd, NAND_ECC_WRITE);
+
+	/* Write data */
+	chip->write_buf(mtd, buf, mtd->writesize);
+
+	/* Update ecc vector from GPMC result registers */
+	chip->ecc.calculate(mtd, buf, &ecc_calc[0]);
+	for (i = 0; i < chip->ecc.total; i++){
+		chip->oob_poi[eccpos[i]] = ecc_calc[i];
+		}
+
+	/* Write ecc vector to OOB area */
+	chip->write_buf(mtd, chip->oob_poi, mtd->oobsize);
+	return 0;
 }
 
 /**
@@ -1010,7 +1138,7 @@ static int omap_wait(struct mtd_info *mtd, struct nand_chip *chip)
 	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
 							mtd);
 	unsigned long timeo = jiffies;
-	int status = NAND_STATUS_FAIL, state = this->state;
+	int status, state = this->state;
 
 	if (state == FL_ERASING)
 		timeo += (HZ * 400) / 1000;
@@ -1025,6 +1153,8 @@ static int omap_wait(struct mtd_info *mtd, struct nand_chip *chip)
 			break;
 		cond_resched();
 	}
+
+	status = gpmc_nand_read(info->gpmc_cs, GPMC_NAND_DATA);
 	return status;
 }
 
@@ -1090,14 +1220,6 @@ static int __devinit omap_nand_probe(struct platform_device *pdev)
 
 	info->nand.options	= pdata->devsize;
 	info->nand.options	|= NAND_SKIP_BBTSCAN;
-
-	/*
-	 * If ELM feature is used in OMAP NAND driver, then configure it
-	 */
-	if (pdata->elm_used) {
-		if (pdata->ecc_opt == OMAP_ECC_BCH8_CODE_HW)
-			omap_configure_elm(&info->mtd, OMAP_BCH8_ECC);
-	}
 
 	if (pdata->ctrlr_suspend)
 		info->ctrlr_suspend = pdata->ctrlr_suspend;
@@ -1207,6 +1329,7 @@ static int __devinit omap_nand_probe(struct platform_device *pdev)
 			info->nand.ecc.bytes     = OMAP_BCH8_ECC_SECT_BYTES;
 			info->nand.ecc.size      = 512;
 			info->nand.ecc.read_page = omap_read_page_bch;
+			info->nand.ecc.write_page	= omap_write_page_bch;
 		} else {
 			info->nand.ecc.bytes    = 3;
 			info->nand.ecc.size     = 512;
@@ -1228,6 +1351,16 @@ static int __devinit omap_nand_probe(struct platform_device *pdev)
 			goto out_release_mem_region;
 		}
 	}
+	/*
+	 * If ELM feature is used in OMAP NAND driver, then configure it
+	 */
+	if(pdata->elm_used){
+		if (pdata->ecc_opt == OMAP_ECC_BCH8_CODE_HW){
+				omap_configure_elm(&info->mtd, OMAP_BCH8_ECC, \
+				 	info->mtd.writesize / info->nand.ecc.size, \
+				 	info->nand.ecc.size, info->nand.ecc.bytes);
+				 }
+	}
 
 	/* select ecc lyout */
 	if (info->nand.ecc.mode != NAND_ECC_SOFT) {
@@ -1237,11 +1370,8 @@ static int __devinit omap_nand_probe(struct platform_device *pdev)
 
 		offset = JFFS2_CLEAN_MARKER_OFFSET;
 
-		if (info->mtd.oobsize == 64)
-			omap_oobinfo.eccbytes = info->nand.ecc.bytes *
-						2048/info->nand.ecc.size;
-		else
-			omap_oobinfo.eccbytes = info->nand.ecc.bytes;
+		omap_oobinfo.eccbytes = info->nand.ecc.bytes *
+			info->mtd.writesize / info->nand.ecc.size;
 
 		if (pdata->ecc_opt == OMAP_ECC_HAMMING_CODE_HW_ROMCODE) {
 			omap_oobinfo.oobfree->offset =
@@ -1250,8 +1380,10 @@ static int __devinit omap_nand_probe(struct platform_device *pdev)
 				(offset + omap_oobinfo.eccbytes);
 		} else if (pdata->ecc_opt == OMAP_ECC_BCH8_CODE_HW) {
 			offset = BCH_ECC_POS; /* Synchronize with U-boot */
-			omap_oobinfo.oobfree->offset =
-				BCH_JFFS2_CLEAN_MARKER_OFFSET;
+
+			omap_oobinfo.oobfree->offset = offset +
+				omap_oobinfo.eccbytes;
+
 			omap_oobinfo.oobfree->length = info->mtd.oobsize -
 						offset - omap_oobinfo.eccbytes;
 		} else {
@@ -1278,6 +1410,17 @@ static int __devinit omap_nand_probe(struct platform_device *pdev)
 	if (nand_scan_tail(&info->mtd)) {
 		err = -ENXIO;
 		goto out_release_mem_region;
+	}
+
+	/* Fix sub page size to page size for HW ECC */
+	if (info->nand.ecc.mode == NAND_ECC_HW) {
+		/*
+		 * For HW ECC, subpage size set to page size
+		 * as subpage operations not supporting.
+		 */
+		info->mtd.subpage_sft = 0;
+		info->nand.subpagesize = info->mtd.writesize >>
+			info->mtd.subpage_sft;
 	}
 
 	mtd_device_parse_register(&info->mtd, NULL, 0,
@@ -1312,7 +1455,7 @@ static int omap_nand_remove(struct platform_device *pdev)
 	nand_release(&info->mtd);
 	iounmap(info->nand.IO_ADDR_R);
 	release_mem_region(info->phys_base, NAND_IO_SIZE);
-	kfree(&info->mtd);
+	kfree(info);
 	return 0;
 }
 

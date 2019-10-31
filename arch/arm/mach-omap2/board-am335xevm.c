@@ -848,42 +848,96 @@ static void usb1_init(int evm_id, int profile)
 }
 
 
-/* NAND partition information */
+/* NAND partition information from u-boot201605 
+ * 0: NAND.SPL            0x00020000      0x00000000      0
+ * 1: NAND.SPL.backup1    0x00020000      0x00020000      0
+ * 2: NAND.SPL.backup2    0x00020000      0x00040000      0
+ * 3: NAND.SPL.backup3    0x00020000      0x00060000      0
+ * 4: NAND.u-boot-spl-os  0x00040000      0x00080000      0
+ * 5: NAND.u-boot         0x00100000      0x000c0000      0
+ * 6: NAND.u-boot-env     0x00020000      0x001c0000      0
+ * 7: NAND.u-boot-env.backup10x00020000   0x001e0000      0
+ * 8: NAND.u-boot.backup1 0x00100000      0x00200000      0
+ * 9: NAND.u-boot.backup2 0x00100000      0x00300000      0
+ * 10: NAND.kernel         0x00800000      0x00400000      0
+ * 11: NAND.kernel.backup1 0x00800000      0x00c00000      0
+ * 12: NAND.recovery       0x02000000      0x01400000      0
+ * 13: NAND.rootfs         0x04000000      0x03400000      0
+ * 14: NAND.rootfs.backup1 0x04000000      0x07400000      0
+ * 15: NAND.overlay        0x02000000      0x0b400000      0
+ * 16: NAND.userdata       0x12c00000      0x0d400000      0
+ * */
 static struct mtd_partition am335x_nand_partitions[] = {
 /* All the partition sizes are listed in terms of NAND block size */
 	{
-		.name           = "SPL",
+		.name           = "NAND.SPL",
 		.offset         = 0,			/* Offset = 0x0 */
 		.size           = SZ_128K,
 	},{
-		.name           = "SPL.backup1",
+		.name           = "NAND.SPL.backup1",
 		.offset         = MTDPART_OFS_APPEND,	/* Offset = 0x20000 */
 		.size           = SZ_128K,
 	},{
-		.name           = "SPL.backup2",
+		.name           = "NAND.SPL.backup2",
 		.offset         = MTDPART_OFS_APPEND,	/* Offset = 0x40000 */
 		.size           = SZ_128K,
 	},{
-		.name           = "SPL.backup3",
+		.name           = "NAND.SPL.backup3",
 		.offset         = MTDPART_OFS_APPEND,	/* Offset = 0x60000 */
 		.size           = SZ_128K,
 	},{
-		.name           = "U-Boot",
+		.name           = "NAND.u-boot-spl-os",
 		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x80000 */
-		.size           = 15 * SZ_128K,
+		.size           = 2 * SZ_128K,
 	},{
-		.name           = "U-Boot Env",
-		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x260000 */
+		.name           = "NAND.u-boot",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0xc0000 */
+		.size           = 8 * SZ_128K,
+	},{
+		.name           = "NAND.u-boot-env",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x1c0000 */
 		.size           = 1 * SZ_128K,
 	},{
-		.name           = "Kernel",
-		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x280000 */
-		.size           = 40 * SZ_128K,
+		.name           = "NAND.u-boot-env.backup1",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x1e0000 */
+		.size           = 1 * SZ_128K,
 	},{
-		.name           = "File System",
-		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x780000 */
-		.size           = MTDPART_SIZ_FULL,
-	},
+		.name           = "NAND.u-boot.backup1",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x200000 */
+		.size           = 8 * SZ_128K,
+	},{
+		.name           = "NAND.u-boot.backup2",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x300000 */
+		.size           = 8 * SZ_128K,
+	},{
+		.name           = "NAND.Kernel",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x400000 */
+		.size           = 8 * SZ_1M,
+	},{
+		.name           = "NAND.Kernel.backup1",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0xc00000 */
+		.size           = 8 * SZ_1M,
+	},{
+		.name           = "NAND.recovery",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x140000 */
+		.size           = 32 * SZ_1M,
+	},{
+		.name           = "NAND.rootfs",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x340000 */
+		.size           = 64 * SZ_1M,
+	},{
+		.name           = "NAND.rootfs.backup1",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0x740000 */
+		.size           = 64 *SZ_1M,
+	},{
+		.name           = "NAND.overlay",
+		.offset         = MTDPART_OFS_APPEND,   /* Offset = 0xb40000 */
+		.size           = 32 *SZ_1M,
+    },{
+    	.name           = "NAND.userdata",
+        .offset         = MTDPART_OFS_APPEND,   /* offset = 0xe400000 */
+        .size           = MTDPART_SIZ_FULL,
+    }
 };
 
 
@@ -922,7 +976,7 @@ static void evm_nand_init(int evm_id, int profile)
 		&am335x_nand_timings);
 	if (!pdata)
 		return;
-//	pdata->ecc_opt =OMAP_ECC_BCH8_CODE_HW;
+	pdata->ecc_opt =OMAP_ECC_BCH8_CODE_HW;
 	pdata->elm_used = true;
 	gpmc_device[0].pdata = pdata;
 	gpmc_device[0].flag = GPMC_DEVICE_NAND;
