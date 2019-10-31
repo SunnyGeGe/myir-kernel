@@ -29,11 +29,13 @@
 #include <linux/pm_runtime.h>
 #include <linux/if_vlan.h>
 #include <linux/net_switch_config.h>
+#include <plat/omap_device.h>
 
 #include <linux/cpsw.h>
 #include <plat/dmtimer.h>
 #include "cpsw_ale.h"
 #include "davinci_cpdma.h"
+#include "davinci_mdio.h"
 
 
 #define CPSW_DEBUG	(NETIF_MSG_HW		| NETIF_MSG_WOL		| \
@@ -1724,6 +1726,10 @@ static int cpsw_switch_config_ioctl(struct net_device *ndev,
 static int cpsw_ndo_do_ioctl(struct net_device *ndev, struct ifreq *ifrq,
 		int cmd)
 {
+	struct cpsw_priv *priv = netdev_priv(ndev);
+	int slave_no = cpsw_slave_phy_index(priv);
+
+	printk("=== cpsw_ndo_ioctl cmd=0x%x\r\n", cmd);
 	if (!(netif_running(ndev)))
 		return -EINVAL;
 
@@ -1733,9 +1739,11 @@ static int cpsw_ndo_do_ioctl(struct net_device *ndev, struct ifreq *ifrq,
 		return cpsw_switch_config_ioctl(ndev, ifrq, cmd);
 
 	default:
-		return -EOPNOTSUPP;
+		break;
 	}
-	return 0;
+	if (!priv->slaves[slave_no].phy)
+		return -EOPNOTSUPP;
+	return phy_mii_ioctl(priv->slaves[slave_no].phy, ifrq, cmd);
 }
 
 static void cpsw_ndo_change_rx_flags(struct net_device *ndev, int flags)
@@ -2061,8 +2069,42 @@ static void cpsw_slave_init(struct cpsw_slave *slave, struct cpsw_priv *priv)
 {
 	void __iomem		*regs = priv->regs;
 	int			slave_num = slave->slave_num;
+	struct device *mdio_dev;
+	u32 phyid;
+	u32 busname;
+	u32 phyid_matched = 0;
 	struct cpsw_slave_data	*data = priv->data.slave_data + slave_num;
+	sscanf(data->phy_id, "%x:%02X", &busname, &phyid);
+#ifdef CONFIG_TI_DAVINCI_MDIO
+//	printk("=== data->phy_id = %s, phyid: %02x\n", data->phy_id, phyid);
+	mdio_dev = omap_device_get_by_hwmod_name("mdio");	
+	if(mdio_dev != NULL){
+		int addr;
+		struct phy_device *phy;
+		struct davinci_mdio_data *mdio_data;
+					/* scan and dump the bus */
+					for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
+						mdio_data = (struct davinci_mdio_data *)(dev_get_drvdata(mdio_dev));
+						if(mdio_data){
+ 							phy = mdio_data->bus->phy_map[addr];
+							if (phy) {
+//							printk("===cpsw mdio_dev: %x\n", mdio_dev);
+//							printk("===cpsw mdio_data: %x\n", mdio_data);
+//							printk("=== phy->addr: %02x\n", phy->addr);
+											if(phy->addr == phyid){
+												 phyid_matched = phyid;
+												 break;
+											}
+								}
+							}
+					}
+	}
 
+//	printk("=== phyid_matched: %02x, sizeof phy_id is %d \n", phyid_matched, sizeof(data->phy_id));
+	snprintf(data->phy_id, sizeof(data->phy_id)+1,
+			 PHY_ID_FMT, "0", phyid_matched);	
+//	printk("=== data->phy_id: %s \n", data->phy_id);
+#endif	
 	slave->data	= data;
 	slave->regs	= regs + data->slave_reg_ofs;
 	slave->sliver	= regs + data->sliver_reg_ofs;

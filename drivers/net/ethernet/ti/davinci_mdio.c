@@ -37,70 +37,20 @@
 #include <linux/pm_runtime.h>
 #include <linux/davinci_emac.h>
 
-/*
- * This timeout definition is a worst-case ultra defensive measure against
- * unexpected controller lock ups.  Ideally, we should never ever hit this
- * scenario in practice.
- */
-#define MDIO_TIMEOUT		100 /* msecs */
-
-#define PHY_REG_MASK		0x1f
-#define PHY_ID_MASK		0x1f
-
-#define DEF_OUT_FREQ		2200000		/* 2.2 MHz */
-
-#define CPGMAC_CLK_CTRL_REG	0x44E00014
-#define CPGMAC_CLK_SYSC         0x4A101208
-#define CPSW_NO_IDLE_NO_STDBY   0xA
-
-struct davinci_mdio_regs {
-	u32	version;
-	u32	control;
-#define CONTROL_IDLE		BIT(31)
-#define CONTROL_ENABLE		BIT(30)
-#define CONTROL_MAX_DIV		(0xff)
-
-	u32	alive;
-	u32	link;
-	u32	linkintraw;
-	u32	linkintmasked;
-	u32	__reserved_0[2];
-	u32	userintraw;
-	u32	userintmasked;
-	u32	userintmaskset;
-	u32	userintmaskclr;
-	u32	__reserved_1[20];
-
-	struct {
-		u32	access;
-#define USERACCESS_GO		BIT(31)
-#define USERACCESS_WRITE	BIT(30)
-#define USERACCESS_ACK		BIT(29)
-#define USERACCESS_READ		(0)
-#define USERACCESS_DATA		(0xffff)
-
-		u32	physel;
-	}	user[0];
-};
+#include "davinci_mdio.h"
 
 struct mdio_platform_data default_pdata = {
 	.bus_freq = DEF_OUT_FREQ,
 };
 
-struct davinci_mdio_data {
-	struct mdio_platform_data pdata;
-	struct davinci_mdio_regs __iomem *regs;
-	spinlock_t	lock;
-	struct clk	*clk;
-	struct device	*dev;
-	struct mii_bus	*bus;
-	bool		suspended;
-	unsigned long	access_time; /* jiffies */
-};
+
 
 static void __davinci_mdio_reset(struct davinci_mdio_data *data)
 {
 	u32 mdio_in, div, mdio_out_khz, access_time;
+	/* set enable and clock divider */
+	__raw_writel(CONTROL_IDLE, &data->regs->control);
+	msleep(PHY_MAX_ADDR * data->access_time);
 
 	mdio_in = clk_get_rate(data->clk);
 	div = (mdio_in / data->pdata.bus_freq) - 1;
@@ -154,6 +104,11 @@ static int davinci_mdio_reset(struct mii_bus *bus)
 	} else {
 		/* desperately scan all phys */
 		dev_warn(data->dev, "no live phy, scanning all\n");
+#ifdef MODULE
+		kernel_restart(NULL);
+#else
+		machine_restart(NULL);
+#endif		
 		phy_mask = 0;
 	}
 	data->bus->phy_mask = phy_mask;
@@ -186,6 +141,11 @@ static inline int wait_for_user_access(struct davinci_mdio_data *data)
 		__davinci_mdio_reset(data);
 		return -EAGAIN;
 	}
+
+	reg = __raw_readl(&regs->user[0].access);
+	if ((reg & USERACCESS_GO) == 0)
+		return 0;
+
 	dev_err(data->dev, "timed out waiting for user access\n");
 	return -ETIMEDOUT;
 }
@@ -244,6 +204,20 @@ static int davinci_mdio_read(struct mii_bus *bus, int phy_id, int phy_reg)
 	}
 
 	spin_unlock(&data->lock);
+
+    if(phy_id == 4){
+        if((phy_reg == 1)&&(ret<0)){
+            return 0x796d;
+        }
+        if((phy_reg == 2)&&(ret<0)){
+            return 0x4d;
+        }
+        if((phy_reg == 3)&&(ret<0)){
+            return 0xd072;
+        }
+        if((phy_reg == 0xa)&&(ret<0)){
+            return 0x3800;
+        }    }
 
 	return ret;
 }
