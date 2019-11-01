@@ -228,6 +228,20 @@
 			"Mic Jack", "Mic Bias",
 			"Headphone Jack", "HP_OUT";
 	};
+	
+	aliases { mdio-gpio0 = &mdio0; };
+	mdio0: mdio{
+		compatible = "virtual,mdio-gpio";
+		pinctrl-names = "default", "sleep";
+		pinctrl-0 = <&davinci_mdio_default>;
+		pinctrl-1 = <&davinci_mdio_sleep>;
+	
+		#address-cells = <1>;
+		#size-cells = <0>;
+		gpios = <&gpio0 1  GPIO_ACTIVE_HIGH>, <&gpio0 0 GPIO_ACTIVE_HIGH>; 
+	}; 
+	
+	
 };
 
 &am33xx_pinmux {
@@ -424,8 +438,8 @@
 	davinci_mdio_default: davinci_mdio_default {
 		pinctrl-single,pins = <
 			/* MDIO */
-			0x148 (PIN_INPUT_PULLUP | SLEWCTRL_FAST | MUX_MODE0)	/* mdio_data.mdio_data */
-			0x14c (PIN_OUTPUT_PULLUP | MUX_MODE0)			/* mdio_clk.mdio_clk */
+			0x148 (PIN_INPUT_PULLUP | SLEWCTRL_FAST | MUX_MODE7)	/* mdio_data.mdio_data */
+			0x14c (PIN_OUTPUT_PULLUP | MUX_MODE7)			/* mdio_clk.mdio_clk */
 		>;
 	};
 
@@ -841,21 +855,21 @@
 	status = "okay";
 };
 
-&davinci_mdio {
-	pinctrl-names = "default", "sleep";
-	pinctrl-0 = <&davinci_mdio_default>;
-	pinctrl-1 = <&davinci_mdio_sleep>;
-	status = "okay";
-};
+//&davinci_mdio {
+//	pinctrl-names = "default", "sleep";
+//	pinctrl-0 = <&davinci_mdio_default>;
+//	pinctrl-1 = <&davinci_mdio_sleep>;
+//	status = "okay";
+//};
 
 &cpsw_emac0 {
-	phy_id = <&davinci_mdio>, <4>;
+	phy_id = <&mdio0>, <4>;
 	phy-mode = "rgmii-txid";
 //	dual_emac_res_vlan=<0>;
 };
 
 &cpsw_emac1 {
-	phy_id = <&davinci_mdio>, <6>;
+	phy_id = <&mdio0>, <6>;
 	phy-mode = "rgmii-txid";
 //	dual_emac_res_vlan=<1>;
 };
@@ -921,6 +935,26 @@
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&dcan1_pins_default>;
+};
+
+&gpio0 {
+	status = "okay";
+	ti,no-reset-on-init;
+};
+
+&gpio1 {
+	status = "okay";
+	ti,no-reset-on-init;
+};
+
+&gpio2 {
+	status = "okay";
+	ti,no-reset-on-init;
+};
+
+&gpio3 {
+	status = "okay";
+	ti,no-reset-on-init;
 };
 
 &wkup_m3_ipc {

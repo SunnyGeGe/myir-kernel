@@ -278,7 +278,7 @@ static int davinci_mdio_read(struct mii_bus *bus, int phy_id, int phy_reg)
 	}
 
 	spin_unlock(&data->lock);
-	if(phy_id == 4){
+	if((phy_id == 4)||(phy_id == 6)){
 		if((phy_reg == 1)&&(ret < 0)){
 			return 0x796d;
 		}
@@ -287,6 +287,9 @@ static int davinci_mdio_read(struct mii_bus *bus, int phy_id, int phy_reg)
 		}
 		if((phy_reg == 3)&&(ret < 0 )){
 			return 0xd072;
+		}
+		if((phy_reg == 0xa)&&(ret < 0 )){
+			return 0x3800;
 		}
 	}
 	return ret;

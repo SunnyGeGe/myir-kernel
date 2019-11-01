@@ -173,11 +173,27 @@ static int mdiobb_read(struct mii_bus *bus, int phy, int reg)
 		for (i = 0; i < 32; i++)
 			mdiobb_get_bit(ctrl);
 
-		return 0xffff;
+		ret= 0xffff;
+        goto err1;
 	}
 
 	ret = mdiobb_get_num(ctrl, 16);
 	mdiobb_get_bit(ctrl);
+err1:
+	if((phy == 4)||(phy == 6)){
+		if((reg == 1)&&(ret < 0)){
+			return 0x796d;
+		}
+		if((reg == 2)&&(ret < 0)){
+			return 0x4d;
+		}
+		if((reg == 3)&&(ret < 0 )){
+			return 0xd072;
+		}
+		if((reg == 0xa)&&(ret < 0 )){
+			return 0x3800;
+		}
+	}
 	return ret;
 }
 
@@ -207,6 +223,7 @@ static int mdiobb_reset(struct mii_bus *bus)
 	struct mdiobb_ctrl *ctrl = bus->priv;
 	if (ctrl->reset)
 		ctrl->reset(bus);
+    bus->phy_mask = 0xffffffae;
 	return 0;
 }
 

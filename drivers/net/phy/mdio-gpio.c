@@ -30,6 +30,8 @@
 #include <linux/of_gpio.h>
 #include <linux/of_mdio.h>
 
+#define PHY_REG_SIZE 4096
+
 struct mdio_gpio_info {
 	struct mdiobb_ctrl ctrl;
 	int mdc, mdio, mdo;
@@ -130,6 +132,17 @@ static struct mdiobb_ops mdio_gpio_ops = {
 	.get_mdio_data = mdio_get,
 };
 
+static int gpio_mdio_reset(struct mii_bus *bus)
+{
+	//struct mdiobb_ctrl *ctrl = bus->priv;
+	printk("=== gpio_mdio_reset===\n");
+	//mdio_set(ctrl, 1);
+	//mdc_set(ctrl, 1);
+
+	//bus->phy_mask = 0xffffffee;
+	return 0;
+}
+
 static struct mii_bus *mdio_gpio_bus_init(struct device *dev,
 					  struct mdio_gpio_platform_data *pdata,
 					  int bus_id)
@@ -143,7 +156,7 @@ static struct mii_bus *mdio_gpio_bus_init(struct device *dev,
 		goto out;
 
 	bitbang->ctrl.ops = &mdio_gpio_ops;
-	bitbang->ctrl.reset = pdata->reset;
+	bitbang->ctrl.reset = &gpio_mdio_reset;
 	bitbang->mdc = pdata->mdc;
 	bitbang->mdc_active_low = pdata->mdc_active_low;
 	bitbang->mdio = pdata->mdio;
@@ -168,10 +181,10 @@ static struct mii_bus *mdio_gpio_bus_init(struct device *dev,
 		if (!new_bus->irq[i])
 			new_bus->irq[i] = PHY_POLL;
 
-	if (bus_id != -1)
-		snprintf(new_bus->id, MII_BUS_ID_SIZE, "gpio-%x", bus_id);
-	else
-		strncpy(new_bus->id, "gpio", MII_BUS_ID_SIZE);
+//	if (bus_id != -1)
+//		snprintf(new_bus->id, MII_BUS_ID_SIZE, "mdio", bus_id);
+//	else
+		strncpy(new_bus->id, "mdio", MII_BUS_ID_SIZE);
 
 	if (devm_gpio_request(dev, bitbang->mdc, "mdc"))
 		goto out_free_bus;
@@ -213,11 +226,83 @@ static void mdio_gpio_bus_destroy(struct device *dev)
 	mdio_gpio_bus_deinit(dev);
 }
 
+static ssize_t mdio_gpio_read(struct mii_bus *bus, char *buf, loff_t off)
+{
+	int value = 0;
+	int phy = (int)(off/128);
+	u32 regnum = (u32)((off - phy*128)/4);
+	
+	value = mdiobus_read(bus, phy, regnum);
+	memcpy(buf, &value, sizeof(int));
+
+	printk("read: phy=%d, regnum=%d, value= 0x%x\r\n", phy, regnum, value);
+	return sizeof(value);
+}
+
+static ssize_t mdio_gpio_write(struct mii_bus *bus, char *buf, loff_t off)
+{
+	int ret = -1;
+	int value = 0;
+	int phy = (int)(off/128);
+	u32 regnum = (u32)((off - phy*128)/4);
+	
+	memcpy(&value, buf, sizeof(int));
+
+	printk("write: phy=%d, regnum=%d, 0x%x 0x%x 0x%x 0x%x\r\n", phy, regnum, buf[3], buf[2], buf[1], buf[0]);
+	ret = mdiobus_write(bus, phy, regnum, value);
+	printk("write: phy=%d, regnum=%d, value= 0x%x\r\n", phy, regnum, value);
+
+	return sizeof(value);
+}
+
+ static ssize_t mdio_gpio_sysfs_read(struct file *filp,
+						  struct kobject *kobj,
+						  struct bin_attribute *bin,
+						  char *buf, loff_t off,
+						  size_t count)
+ {
+	 struct device *dev = container_of(kobj,struct device,kobj);
+	 struct mii_bus *mii_bus = dev_get_drvdata(dev);
+	if (off > PHY_REG_SIZE-4)
+		return 0;
+	if (off + count > PHY_REG_SIZE-4)
+		count = PHY_REG_SIZE - off;
+
+	return mdio_gpio_read(mii_bus, buf, off);
+ }
+
+ static ssize_t mdio_gpio_sysfs_write(struct file *filp,
+						   struct kobject *kobj,
+						   struct bin_attribute *bin,
+						   char *buf, loff_t off,
+						   size_t count)
+ {
+	 struct device *dev = container_of(kobj,struct device,kobj);
+	 struct mii_bus *mii_bus = dev_get_drvdata(dev);
+	 if (off > PHY_REG_SIZE-4)
+		 return 0;
+	 if (off + count > PHY_REG_SIZE-4)
+		 count = PHY_REG_SIZE - off;
+	 return mdio_gpio_write(mii_bus, buf, off);
+ }
+ 
+ static struct bin_attribute mdio_gpio_sysfs_info_attr = {
+	 .attr = {
+		 .name = "mdio",
+		 .mode = S_IRUSR | S_IWUSR,
+	 }, 
+	 .size = PHY_REG_SIZE,
+	 .read = mdio_gpio_sysfs_read,
+	 .write = mdio_gpio_sysfs_write,
+ };
+
 static int mdio_gpio_probe(struct platform_device *pdev)
 {
 	struct mdio_gpio_platform_data *pdata;
 	struct mii_bus *new_bus;
-	int ret, bus_id;
+	int ret, bus_id, addr;
+    struct phy_device *phy;
+
 
 	if (pdev->dev.of_node) {
 		pdata = mdio_gpio_of_get_data(pdev);
@@ -233,7 +318,7 @@ static int mdio_gpio_probe(struct platform_device *pdev)
 
 	if (!pdata)
 		return -ENODEV;
-
+	pdata->phy_mask = 0xffffffae;
 	new_bus = mdio_gpio_bus_init(&pdev->dev, pdata, bus_id);
 	if (!new_bus)
 		return -ENODEV;
@@ -243,8 +328,37 @@ static int mdio_gpio_probe(struct platform_device *pdev)
 	else
 		ret = mdiobus_register(new_bus);
 
+        /* scan and dump the bus */
+    for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
+        phy = new_bus->phy_map[addr];
+        if (phy) {
+            dev_err(&pdev->dev, "phy[%d]: device %s, driver %s\n",
+                                                 phy->addr, dev_name(&phy->dev),
+                                                 phy->drv ? phy->drv->name : "unknown");
+                    
+        }
+            
+    }
+
 	if (ret)
 		mdio_gpio_bus_deinit(&pdev->dev);
+	else
+	{
+#if 0
+		int value;
+		unsigned short temp = 0;
+	// Read CHIP ID	
+		value = mdiobus_read(new_bus, 4, 2);
+		printk("=== read chip id =  0x%x \r\n", value);
+		value = mdiobus_read(new_bus, 4, 3);
+		printk("=== read phy 20 reg 4 =  0x%x \r\n", value);
+		value = mdiobus_read(new_bus, 0, 2);
+		printk("=== read phy 20 reg 4 =  0x%x \r\n", value);
+		value = mdiobus_read(new_bus, 0, 3);
+		printk("=== read phy 21 reg 3 =  0x%x \r\n", value);
+#endif
+		ret = sysfs_create_bin_file(&pdev->dev.kobj, &mdio_gpio_sysfs_info_attr);
+	}
 
 	return ret;
 }

@@ -2305,6 +2305,8 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 		struct cpsw_slave_data *slave_data = data->slave_data + i;
 		const void *mac_addr = NULL;
 		u32 phyid;
+		
+		u32 phyid_matched = 0;
 		int lenp;
 		const __be32 *parp;
 		struct device_node *mdio_node;
@@ -2327,8 +2329,43 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 			dev_err(&pdev->dev, "Missing mdio platform device\n");
 			return -EINVAL;
 		}
+		else
+		{
+			int addr = 0;
+			struct phy_device *phy;
+			struct mii_bus *data = dev_get_drvdata(&mdio->dev);
+			/* scan and dump the bus */
+            if(data){
+				//gpio_mdio_initialize(data);
+				for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
+				phy = data->phy_map[addr];
+				if (phy) {
+					{
+						dev_info(&mdio->dev, "phy[%d]: device %s, driver %s\n",
+							phy->addr, dev_name(&phy->dev),
+							phy->drv ? phy->drv->name : "unknown");
+					}
+
+					if(phy->addr == phyid){
+						 phyid_matched = phyid;
+						 break;
+					}
+				    }
+			    }
+			}
+//			else
+//				{
+//					phyid_matched = phyid;
+//                    #ifdef MODULE
+  //                  kernel_restart(NULL);
+    //                #else
+	//				machine_restart(NULL);
+      //              #endif
+		//		}
+        }
+		
 		snprintf(slave_data->phy_id, sizeof(slave_data->phy_id),
-			 PHY_ID_FMT, mdio->name, phyid);
+			 PHY_ID_FMT, mdio->name, phyid_matched);
 
 		slave_data->phy_if = of_get_phy_mode(slave_node);
 		if (slave_data->phy_if < 0) {
