@@ -556,11 +556,11 @@ static struct pinmux_config gpio_keys_pin_mux[] = {
 
 /* pinmux for led device */
 static struct pinmux_config gpio_led_mux[] = {
-	    {"mcasp0_aclkr.gpio3_18",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{"mcasp0_aclkr.gpio3_18",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
         {"spi0_d0.gpio0_3",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
         {"gpmc_ad11.gpio0_27",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
-        {"xdma_event_intr0.gpio0_19",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
-        {"mcasp0_fsr.gpio3_19",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+        {"emu1.gpio3_8",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},          // V2_ETHERNET_REST_PIN
+        {"mcasp0_fsr.gpio3_19",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},    // V2_WATCHDOG_WDI
 	{NULL, 0},
 };
 
@@ -1159,7 +1159,7 @@ static struct platform_device leds_gpio = {
 	},
 };
 
-#define V2_ETHERNET_REST_PIN GPIO_TO_PIN(0,19)
+#define V2_ETHERNET_REST_PIN GPIO_TO_PIN(3,8)
 #define V2_EXT_WDI_PIN	GPIO_TO_PIN(3,19)
 
 static void gpio_led_init(int evm_id, int profile)
