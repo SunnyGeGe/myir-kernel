@@ -159,7 +159,7 @@ static int __init uart4_setup(char *s) {
 }
 __setup("uart4_to_can1=", uart4_setup);
 
-static char* display_mode = "hdmi480p";
+static char* display_mode = "lcd7ir";
 module_param(display_mode, charp, S_IRUGO);
 
 #define NUM_OF_LCDMODE 13
