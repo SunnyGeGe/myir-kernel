@@ -419,7 +419,8 @@ config TOUCHSCREEN_TI_TSCADC
 	  module will be called ti_tscadc.
 
 config TOUCHSCREEN_TI_TSC
-	tristate "TI Touchscreen Interface"
+	tristate "TI Touchscreen Interface (newer)"
+	select MFD_TI_TSCADC
 	help
 	  Say Y here if you have 4/5/8 wire touchscreen controller
 	  to be connected to the ADC controller on your TI SoC.
@@ -759,5 +760,16 @@ config TOUCHSCREEN_TPS6507X
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called tps6507x_ts.
+
+config TOUCHSCREEN_FT5X0X_MYIR
+        tristate "MYiR ft5x0x i2c touchscreen"
+        depends on I2C
+        default m
+        help
+          FocalTech ft5x0x TouchScreen driver
+          Say Y here if you have a ft5x0x i2c touchscreen controller
+          To compile this driver as a module, choose M here.
+
+          If unsure, say N.
 
 endif

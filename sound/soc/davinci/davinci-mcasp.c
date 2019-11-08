@@ -949,10 +949,11 @@ static int davinci_mcasp_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err_release_clk;
 	}
-
+#if defined(CONFIG_MACH_C335X)
         /* add by embest */
         mcasp_set_bits(dev->base + DAVINCI_MCASP_PDIR_REG, AHCLKX);
         /* end add */
+#endif
 
 	dev->op_mode = pdata->op_mode;
 	dev->tdm_slots = pdata->tdm_slots;
@@ -1026,6 +1027,25 @@ static int davinci_mcasp_probe(struct platform_device *pdev)
 
 	if (ret != 0)
 		goto err_iounmap;
+#if defined(CONFIG_MACH_Y335X)
+	/* 
+	 * Use AHCLKX for MCLK, and output to AHCLKX pin. MYIR
+	 */
+	/* 1. set AHCLKX to MCASP function */
+	mcasp_clr_bits(dev->base + DAVINCI_MCASP_PFUNC_REG, AHCLKX);
+	/* 2. set AHCLKX pin to output */
+	mcasp_set_bits(dev->base + DAVINCI_MCASP_PDIR_REG, AHCLKX);
+	/* 3. set HCLKXDIV to div-by-2 (12MHz) */ 
+	mcasp_mod_bits(dev->base + DAVINCI_MCASP_AHCLKXCTL_REG, 0x1, 0xFFF);
+	/* 4. select internal clock for AHCLKX source */
+    mcasp_set_bits(dev->base + DAVINCI_MCASP_AHCLKXCTL_REG, AHCLKXE);
+	/* 5. bring TXHCLK out of reset(apply the divider) */
+	mcasp_set_ctl_reg(dev->base + DAVINCI_MCASP_GBLCTLX_REG, TXHCLKRST);
+
+//	printk(KERN_ERR"- PFUC: %#X\n", mcasp_get_reg(dev->base + DAVINCI_MCASP_PFUNC_REG));
+//	printk(KERN_ERR"- PDIR: %#X\n", mcasp_get_reg(dev->base + DAVINCI_MCASP_PDIR_REG));
+//	printk(KERN_ERR"- AHCLXCTL: %#X\n", mcasp_get_reg(dev->base + DAVINCI_MCASP_AHCLKXCTL_REG));
+#endif
 	return 0;
 
 err_iounmap:

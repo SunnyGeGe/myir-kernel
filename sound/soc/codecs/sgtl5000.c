@@ -194,6 +194,15 @@ static const unsigned int mic_gain_tlv[] = {
 /* tlv for hp volume, -51.5db to 12.0db, step .5db */
 static const DECLARE_TLV_DB_SCALE(headphone_volume, -5150, 50, 0);
 
+
+/* Added by MYIR */
+/* input sources for ADC */
+static const char *adc_mux_text[] = {
+        "MIC_IN", "LINE_IN"
+};
+static const struct soc_enum adc_enum =
+SOC_ENUM_SINGLE(SGTL5000_CHIP_ANA_CTRL, 2, 2, adc_mux_text);
+
 static const struct snd_kcontrol_new sgtl5000_snd_controls[] = {
         /* SOC_DOUBLE_S8_TLV with invert */
         {
@@ -222,6 +231,9 @@ static const struct snd_kcontrol_new sgtl5000_snd_controls[] = {
 
         SOC_SINGLE_TLV("Mic Volume", SGTL5000_CHIP_MIC_CTRL,
                         0, 4, 0, mic_gain_tlv),
+						
+		/* Added by MYIR */
+		SOC_ENUM("Input Mux", adc_enum),
 };
 
 /* mute the codec used by alsa core */
@@ -791,6 +803,8 @@ static int sgtl5000_power_init(struct snd_soc_codec *codec)
         tmp = snd_soc_read(codec, SGTL5000_CHIP_ANA_CTRL);
         tmp |= SGTL5000_HP_ZCD_EN;
         tmp |= SGTL5000_ADC_ZCD_EN;
+		/* Added by MYIR, set adc source to line in by default */
+		tmp |= (1 << 2);
         snd_soc_write(codec, SGTL5000_CHIP_ANA_CTRL, tmp);
 
 	return 0;

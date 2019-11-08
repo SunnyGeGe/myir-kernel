@@ -337,6 +337,24 @@ config MACH_AM335XEVM
 	depends on SOC_OMAPAM33XX
 	default y
 
+choice
+        prompt "Machines based on AM335XEVM"
+        default MACH_C335X
+        help
+          Select the desired machine type based on am335xevm.
+
+          If you are not absolutely sure what you are doing, leave this
+          option alone!
+
+        config MACH_C335X
+                bool "myd_c335x"
+        config MACH_Y335X
+                bool "myd_y335x"
+        config MACH_J335X
+                bool "myd_j335x"
+endchoice
+
+config MACH_AM335XIAEVM
 config MACH_AM335XIAEVM
 	bool "AM335X IA Evaluation Module"
 	depends on SOC_OMAPAM33XX
