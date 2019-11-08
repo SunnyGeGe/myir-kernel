@@ -157,7 +157,51 @@ static int evm_aic3x_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
+/* davinci-evm machine dapm widgets */
+static const struct snd_soc_dapm_widget sgtl5000_dapm_widgets[] = {
+	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+	SND_SOC_DAPM_LINE("Line Out", NULL),
+	SND_SOC_DAPM_MIC("Mic Jack", NULL),
+	SND_SOC_DAPM_LINE("Line In", NULL),
+};
 
+/* davinci-evm machine audio_mapnections to the codec pins */
+static const struct snd_soc_dapm_route sgtl5000_audio_map[] = {
+	/* Headphone connected to HP_OUT */
+	{"Headphone Jack", NULL, "HP_OUT"},
+
+	/* Line Out connected to LINE_OUT */
+	{"Line Out", NULL, "LINE_OUT"},
+
+	/* Mic connected to (MIC) */
+	{"MIC_IN", NULL, "Mic Bias"},
+	{"Mic Bias", NULL, "Mic Jack"},
+
+	/* Line In connected to (LINE_IN) */
+	{"LINE_IN", NULL, "Line In"},
+};
+
+/* Logic for a aic3x as connected on a davinci-evm */
+static int evm_sgtl5000_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_card *card = rtd->card;
+
+	/* Add davinci-evm specific widgets */
+	snd_soc_dapm_new_controls(&card->dapm, sgtl5000_dapm_widgets,
+				  ARRAY_SIZE(sgtl5000_dapm_widgets));
+
+
+		/* Set up davinci-evm specific audio path audio_map */
+	snd_soc_dapm_add_routes(&card->dapm, sgtl5000_audio_map,
+					ARRAY_SIZE(sgtl5000_audio_map));
+
+	/* not connected */
+	snd_soc_dapm_enable_pin(&card->dapm, "LINE_OUT");
+	snd_soc_dapm_nc_pin(&card->dapm, "LINE_IN");
+	snd_soc_dapm_enable_pin(&card->dapm, "Mic Jack");
+
+	return 0;
+}
 /* davinci-evm digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link dm6446_evm_dai = {
 	.name = "TLV320AIC3X",
@@ -249,9 +293,13 @@ static struct snd_soc_dai_link am335x_evm_dai = {
 	.stream_name = "SGTL5000",
 	.cpu_dai_name = "davinci-mcasp.0",
 	.codec_dai_name = "sgtl5000",
+#if defined(CONFIG_MACH_C335X)|| defined(CONFIG_MACH_Y335X)
 	.codec_name = "sgtl5000.2-000a",
+#elif defined(CONFIG_MAC_J335X)
+	.codec_name = "sgtl5000.1-000a",
+#endif
 	.platform_name = "davinci-pcm-audio",
-//	.init = evm_aic3x_init,
+	.init = evm_sgtl5000_init,
 	.ops = &evm_ops,
 };
 

@@ -72,26 +72,43 @@
 #include "devices.h"
 #include "hsmmc.h"
 
+/* Add by JBO for support sc16is752 */
+#include <linux/sc16is7x2.h>
 /* Convert GPIO signal to GPIO pin number */
 #define GPIO_TO_PIN(bank, gpio) (32 * (bank) + (gpio))
 #if defined(CONFIG_MACH_C335X)
-	#define V2_ETHERNET_REST_PIN GPIO_TO_PIN(3,8)
-	#define V2_EXT_WDI_PIN	GPIO_TO_PIN(3,19)
-	#define V2_EXT_EEPROM_WP	GPIO_TO_PIN(3,7)
+	#define V2_ETHERNET_REST_PIN 	GPIO_TO_PIN(3,8)
+	#define V2_EXT_WDI_PIN			GPIO_TO_PIN(3,19)
+	#define V2_EXT_EEPROM_WP		GPIO_TO_PIN(3,7)
 	#define V2_EXT_CTOUCH_INT		-1
 	#define V2_EXT_CTOUCH_INT2IRQ	-1
 	#define V2_EXT_CTOUCH_MODE		1			// 1: poll 0: interrupt
-	#define V2_EXT_MMC0_CD		GPIO_TO_PIN(3,21)
-	#define V2_EXT_BUZZER		-1
+	#define V2_EXT_MMC0_CD			GPIO_TO_PIN(3,21)
+	#define V2_EXT_BUZZER			-1
+	#define V2_EXT_KEY_MENU_PIN		GPIO_TO_PIN(0, 29)
+	#define V2_EXT_KEY_BACK_PIN		GPIO_TO_PIN(3, 0)
 #elif defined(CONFIG_MACH_Y335X)
-	#define V2_ETHERNET_REST_PIN  -1
-	#define V2_EXT_WDI_PIN	GPIO_TO_PIN(3,8)
-	#define V2_EXT_EEPROM_WP	GPIO_TO_PIN(3,7)
+	#define V2_ETHERNET_REST_PIN  	-1
+	#define V2_EXT_WDI_PIN			GPIO_TO_PIN(3,8)
+	#define V2_EXT_EEPROM_WP		GPIO_TO_PIN(3,7)
 	#define V2_EXT_CTOUCH_INT		GPIO_TO_PIN(0,6)
 	#define V2_EXT_CTOUCH_INT2IRQ	OMAP_GPIO_IRQ(GPIO_TO_PIN(0, 6))
 	#define V2_EXT_CTOUCH_MODE		0			// 1: poll 0: interrupt
-	#define V2_EXT_MMC0_CD		GPIO_TO_PIN(3,19)
-	#define V2_EXT_BUZZER		GPIO_TO_PIN(0,7)
+	#define V2_EXT_MMC0_CD			GPIO_TO_PIN(3,19)
+	#define V2_EXT_BUZZER			GPIO_TO_PIN(0,7)
+	#define V2_EXT_KEY_MENU_PIN		GPIO_TO_PIN(0, 29)
+	#define V2_EXT_KEY_BACK_PIN		GPIO_TO_PIN(3, 0)
+#elif defined(CONFIG_MACH_J335X)
+	#define V2_ETHERNET_REST_PIN  	GPIO_TO_PIN(3,7)
+	#define V2_EXT_WDI_PIN			GPIO_TO_PIN(3,8)
+	#define V2_EXT_EEPROM_WP		-1
+	#define V2_EXT_CTOUCH_INT		GPIO_TO_PIN(0,20)
+	#define V2_EXT_CTOUCH_INT2IRQ	OMAP_GPIO_IRQ(GPIO_TO_PIN(0, 20))
+	#define V2_EXT_CTOUCH_MODE		0			// 1: poll 0: interrupt
+	#define V2_EXT_MMC0_CD			GPIO_TO_PIN(3,19)
+	#define V2_EXT_BUZZER			-1
+	#define V2_EXT_KEY_MENU_PIN		GPIO_TO_PIN(0, 22)
+	#define V2_EXT_KEY_BACK_PIN		GPIO_TO_PIN(0, 23)
 #endif
 
 /* AM335X EVM Phy ID and Debug Registers */
@@ -123,6 +140,24 @@ static int __init lcd_type_init(char* s) {
         return 0;
 }
 __setup("dispmode=", lcd_type_init);
+
+/* Add by JBO for handling uart2 setting */
+static bool uart2_to_uart5hwc = false;
+static int __init uart2_setup(char *s) {
+	if (s[0] == '1')
+		uart2_to_uart5hwc = true;
+	return 0;
+}
+__setup("uart2_to_uart5hwc=", uart2_setup);
+
+/* Add by JBO for handling uart4 setting */
+static bool uart4_to_can1 = true;
+static int __init uart4_setup(char *s) {
+	if (s[0] == '0')
+		uart4_to_can1 = false;
+	return 0;
+}
+__setup("uart4_to_can1=", uart4_setup);
 
 static char* display_mode = "hdmi480p";
 module_param(display_mode, charp, S_IRUGO);
@@ -303,12 +338,7 @@ static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
 		.gpio_wp        = -EINVAL,
 		.ocr_mask       = MMC_VDD_32_33 | MMC_VDD_33_34, /* 3V3 */
 	},
-#if defined(CONFIG_MACH_C335X)
-	{
-		.mmc            = 0,	/* will be set at runtime */
-	},
-#elif defined(CONFIG_MACH_Y335X)
-
+#if defined(CONFIG_MACH_Y335X)
 	{ /* Added for broadcom wifi, MYIR */
 		.mmc            = 3,	 /* mmc2 sdio wifi */
 		.caps			= MMC_CAP_4_BIT_DATA,
@@ -317,6 +347,10 @@ static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
 		.nonremovable	= 1,
 		.name			= "bm-wifi",	
 		.ocr_mask       = MMC_VDD_32_33 | MMC_VDD_33_34, /* 3V3 */
+	},
+#else
+	{
+		.mmc            = 0,	/* will be set at runtime */
 	},
 #endif
 	{
@@ -543,16 +577,23 @@ static struct pinmux_config i2c0_pin_mux[] = {
 
 static struct pinmux_config i2c1_pin_mux[] = {
 	{"spi0_d1.i2c1_sda",    OMAP_MUX_MODE2 | AM33XX_SLEWCTRL_SLOW |
-					AM33XX_PULL_ENBL | AM33XX_INPUT_EN},
+             	            AM33XX_PULL_ENBL | AM33XX_INPUT_EN | AM33XX_PULL_UP},
 	{"spi0_cs0.i2c1_scl",   OMAP_MUX_MODE2 | AM33XX_SLEWCTRL_SLOW |
-					AM33XX_PULL_ENBL | AM33XX_INPUT_EN},
+	                        AM33XX_PULL_ENBL | AM33XX_INPUT_EN | AM33XX_PULL_UP},
 	{NULL, 0},
+};
+
+/* Add by JBO */
+static struct pinmux_config i2c_gpio_pin_mux[] = {
+	{"spi0_d1.gpio0_4", OMAP_MUX_MODE7 | AM33XX_INPUT_EN},
+	{"spi0_cs0.gpio0_5", OMAP_MUX_MODE7 | AM33XX_INPUT_EN},
+	{NULL, 0 },
 };
 
 /* Module pin mux for mcasp0 */
 static struct pinmux_config mcasp0_pin_mux[] = {
         {"mcasp0_aclkx.mcasp0_aclkx", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
-#if defined(CONFIG_MACH_Y335X)
+#if defined(CONFIG_MACH_Y335X)||defined(CONFIG_MACH_J335X)
         {"mcasp0_ahclkx.mcasp0_ahclkx", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 #endif
         {"mcasp0_fsx.mcasp0_fsx", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
@@ -595,12 +636,14 @@ static struct pinmux_config bcwifi_pin_mux[] = {
 };
 #endif
 
-static struct pinmux_config d_can_pin_mux[] = {
+/* Module pin mux for uart4 to can1 -- Add by JBO */
+static struct pinmux_config d_can1_pin_mux[] = {
 	{"uart0_ctsn.d_can1_tx", OMAP_MUX_MODE2 | AM33XX_PULL_ENBL},
 	{"uart0_rtsn.d_can1_rx", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLUP},
         {NULL, 0},
 };
 
+#if defined(CONFIG_MACH_C335X)
 
 /* pinmux for gpio based key */
 static struct pinmux_config gpio_keys_pin_mux[] = {
@@ -609,8 +652,6 @@ static struct pinmux_config gpio_keys_pin_mux[] = {
 	{NULL, 0},
 };
 
-
-#if defined(CONFIG_MACH_C335X)
 /* pinmux for led device */
 static struct pinmux_config gpio_led_mux[] = {
 	{"mcasp0_aclkr.gpio3_18",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
@@ -657,6 +698,14 @@ static struct pinmux_config gpio_tpint_mux[] = {
 
 
 #elif defined(CONFIG_MACH_Y335X)
+
+/* pinmux for gpio based key */
+static struct pinmux_config gpio_keys_pin_mux[] = {
+		{"mii1_col.gpio3_0",    OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+		{"rmii1_refclk.gpio0_29",	OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+	{NULL, 0},
+};
+
 /* pinmux for led device */
 static struct pinmux_config gpio_led_mux[] = {
 	{"mcasp0_aclkr.gpio3_18",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
@@ -695,11 +744,67 @@ static struct pinmux_config gpio_e2pwp_mux[] = {
         {NULL, 0},
 };
 
-/* pinmux for LCD capacitive TP INT */
+/* pinmux for LCD capacitive TP INT 
+       myd-am335x-y - spi0_cs1.gpio0_6
+*/
 static struct pinmux_config gpio_tpint_mux[] = {
         {"spi0_cs1.gpio0_6",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
         {NULL, 0},
 };
+#elif defined(CONFIG_MACH_J335X)
+/* pinmux for gpio based key */
+static struct pinmux_config gpio_keys_pin_mux[] = {
+	{"gpmc_ad8.gpio0_22", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+	{"gpmc_ad9.gpio0_23", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+	{NULL, 0},
+};
+
+/* pinmux for led device */
+static struct pinmux_config gpio_led_mux[] = {
+	    {"mcasp0_aclkr.gpio3_18",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+        {"spi0_d0.gpio0_3",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+        //{"gpmc_ad11.gpio0_27",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{NULL, 0},
+};
+
+static struct pinmux_config mmc0_cd_only_pin_mux[] = {
+//	{"mcasp0_ahclkx.gpio3_21",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+	{"mcasp0_fsr.gpio3_19",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+	{NULL, 0},
+};
+
+/* pinmux for phy_rst, MYIR */
+static struct pinmux_config gpio_phyrst_mux[] = {
+        {"emu0.gpio3_7",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},          // V2_ETHERNET_REST_PIN
+    	{NULL, 0},
+};
+
+/* pinmux for buzzer, MYIR */
+static struct pinmux_config gpio_buzzer_mux[] = {
+//        {"ecap0_in_pwm0_out.gpio0_7",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+    	{NULL, 0},
+};
+
+/* pinmux for watch dog timer input, MYIR */
+static struct pinmux_config gpio_wdi_mux[] = {
+        {"emu1.gpio3_8",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+        {NULL, 0},
+};
+
+/* pinmux for e2pwp, MYIR */
+static struct pinmux_config gpio_e2pwp_mux[] = {
+        {"emu0.gpio3_7",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+        {NULL, 0},
+};
+
+/* pinmux for LCD capacitive TP INT
+	   myd-am335x-j - xdma_event_intr1.gpio0_20
+*/
+static struct pinmux_config gpio_tpint_mux[] = {
+	{"xdma_event_intr1.gpio0_20",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+    {NULL, 0},
+};
+
 #endif
 
 /*
@@ -782,6 +887,10 @@ static struct pinmux_config ehrpwm0_pin_mux[] = {
 static struct pinmux_config uart1_pin_mux[] = {
         {"uart1_rxd.uart1_rxd", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
         {"uart1_txd.uart1_txd", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL},
+#if defined(CONFIG_MACH_J335X)
+		{"uart1_ctsn.uart1_ctsn", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+		{"uart1_rtsn.uart1_rtsn", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT_PULLUP},
+#endif
         {NULL, 0},
 };
 /* Module pin mux for uart2 */
@@ -789,6 +898,12 @@ static struct pinmux_config uart2_pin_mux[] = {
         {"mii1_crs.uart2_rxd", OMAP_MUX_MODE6 | AM33XX_PIN_INPUT_PULLUP},
         {"mii1_rxerr.uart2_txd", OMAP_MUX_MODE6 | AM33XX_PULL_ENBL},
         {NULL, 0},
+};
+/* Module pin mux for uart2 to uart5 hw control -- Add by JBO */
+static struct pinmux_config uart2_to_uart5hwc_pin_mux[] = {
+	{"mii1_crs.uart5_ctsn", OMAP_MUX_MODE5 | AM33XX_PIN_INPUT_PULLUP},
+	{"mii_rxerr.uart5_rtsn", OMAP_MUX_MODE5 | AM33XX_PIN_OUTPUT_PULLUP},
+	{NULL, 0},
 };
 
 /* Module pin mux for uart3 */
@@ -805,6 +920,19 @@ static struct pinmux_config uart4_pin_mux[] = {
         {NULL, 0},
 };
 
+/* Module pin mux for uart5 */
+static struct pinmux_config uart5_pin_mux[] = {
+	{"mii1_col.uart5_rxd", OMAP_MUX_MODE3 | AM33XX_PIN_INPUT_PULLUP},
+	{"rmii1_refclk.uart5_txd", OMAP_MUX_MODE3 | AM33XX_PULL_ENBL},
+	{NULL, 0},
+};
+
+/* Pin mux for sc16is7x2 -- Add by JBO */
+static struct pinmux_config sc16is7x2_pin_mux[] = {
+	{"gpmc_ad10.gpio0_26", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT_PULLUP},
+	{"gpmc_ad11.gpio0_27", OMAP_MUX_MODE7 | AM33XX_INPUT_EN},
+	{NULL, 0 },
+};
 
 #define AM335XEVM_WLAN_PMENA_GPIO	GPIO_TO_PIN(1, 30)
 #define AM335XEVM_WLAN_IRQ_GPIO		GPIO_TO_PIN(3, 17)
@@ -1152,6 +1280,25 @@ static struct gslx680_platform_data gslx680_plat_data = {
 	.polling_mode   = 1,
 };
 
+/* sc16is7x2 -- Add by JBO */
+static const char *i2c_gpio_names[SC16IS7X2_NR_GPIOS] = {
+	"i2c-gpio200",
+	"i2c-gpio201",
+	"i2c-gpio202",
+	"i2c-gpio203",
+	"i2c-gpio204",
+	"i2c-gpio205",
+	"i2c-gpio206",
+	"i2c-gpio207",
+};
+static struct sc16is7x2_platform_data i2c_uart_gpio_data = {
+	.uartclk        = /*48000000*/11059200,/* crystal freq of sc16is7x2*/
+	.uart_base      = 0,
+	.gpio_base      = SC16IS7X2_GPIO_BASE,
+	.label          = NULL,
+	.names          = i2c_gpio_names,
+};
+
 static struct i2c_board_info am335x_i2c1_boardinfo[] = {
 	{
 		I2C_BOARD_INFO("sgtl5000", 0x0A),
@@ -1167,6 +1314,13 @@ static struct i2c_board_info am335x_i2c1_boardinfo[] = {
 		I2C_BOARD_INFO("gslX680", 0x40),
 		.platform_data = &gslx680_plat_data,
 	},
+#if defined(CONFIG_MACH_J335X)
+	{
+		I2C_BOARD_INFO("sc16is7x2", 0x48),
+		.platform_data  = &i2c_uart_gpio_data,
+		.irq = OMAP_GPIO_IRQ(GPIO_TO_PIN(0, 27)),
+	},
+#endif
 };
 
 
@@ -1190,7 +1344,12 @@ static void uart1_init(int evm_id, int profile)
 static void uart2_init(int evm_id, int profile)
 {
         /* Configure Uart2*/
-        setup_pin_mux(uart2_pin_mux);
+	if (!uart2_to_uart5hwc) {
+		setup_pin_mux(uart2_pin_mux);
+	} else {
+		setup_pin_mux(uart2_to_uart5hwc_pin_mux);
+	}
+	
         return;
 }
 
@@ -1203,17 +1362,27 @@ static void uart3_init(int evm_id, int profile)
 
 static void uart4_init(int evm_id, int profile)
 {
-        /* Configure Uart4*/
+	if (!uart4_to_can1){
         setup_pin_mux(uart4_pin_mux);
+	}
         return;
 }
 
+static void uart5_init(int evm_id, int profile)
+{
+	/* Configure Uart5 */
+	setup_pin_mux(uart5_pin_mux);
+	return;
+}
 
 static void d_can_init(int evm_id, int profile)
 {
-	setup_pin_mux(d_can_pin_mux);
-	/* Instance Zero */
-	am33xx_d_can_init(1);
+	/* Configure can1 */
+	if (uart4_to_can1) {
+		setup_pin_mux(d_can1_pin_mux);
+		/* Instance One */
+		am33xx_d_can_init(1);
+	}
 }
 
 static void mmc0_init(int evm_id, int profile)
@@ -1236,18 +1405,20 @@ static void mmc0_init(int evm_id, int profile)
 /* Configure GPIOs for GPIO Keys */
 static struct gpio_keys_button gpio_buttons[] = {
         {
-                .code                   = KEY_HOME,
-                .gpio                   = GPIO_TO_PIN(0, 29),
+                .code                   = KEY_MENU,
+                .gpio                   = V2_EXT_KEY_MENU_PIN,
                 .active_low             = true,
                 .desc                   = "menu",
                 .type                   = EV_KEY,
+                .wakeup                 = 1,
         },
         {
-                .code                   = KEY_ESC,
-                .gpio                   = GPIO_TO_PIN(3, 0),
+                .code                   = KEY_BACK,
+                .gpio                   = V2_EXT_KEY_BACK_PIN,
                 .active_low             = true,
                 .desc                   = "back",
                 .type                   = EV_KEY,
+                .wakeup                 = 1,
         },
 };
 
@@ -1423,6 +1594,9 @@ static struct evm_dev_cfg myd_am335x_dev_cfg[] = {
 	{uart3_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
 #endif
 	{uart4_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
+#if defined(CONFIG_MACH_J335X)
+	{uart5_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
+#endif
 	{d_can_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
 	{gpio_keys_init,  DEV_ON_BASEBOARD, PROFILE_ALL},
 	{gpio_led_init,  DEV_ON_BASEBOARD, PROFILE_ALL},
@@ -1665,6 +1839,15 @@ static struct i2c_board_info __initdata am335x_i2c0_boardinfo[] = {
 		I2C_BOARD_INFO("tps65217", TPS65217_I2C_ID),
 		.platform_data  = &myir_tps65217_info,
 	},
+#if defined(CONFIG_MACH_J335X)
+	{
+		I2C_BOARD_INFO("sgtl5000", 0x0A),
+	},
+	{
+		I2C_BOARD_INFO("ft5x06_ts", 0x38),
+		.platform_data = &ts_plat_data,
+	},
+#endif
 	{
 		I2C_BOARD_INFO("at24", 0x50),
 		.platform_data = &board_eeprom,
@@ -1690,6 +1873,9 @@ static void __init am335x_evm_i2c_init(void)
 	setup_pin_mux(i2c0_pin_mux);
 	omap_register_i2c_bus(1, 100, am335x_i2c0_boardinfo,
 				ARRAY_SIZE(am335x_i2c0_boardinfo));
+#if defined(CONFIG_MACH_J335X)
+	setup_pin_mux(sc16is7x2_pin_mux);
+#endif	
 	setup_pin_mux(i2c1_pin_mux);
 	omap_register_i2c_bus(2, 100, am335x_i2c1_boardinfo,
 				ARRAY_SIZE(am335x_i2c1_boardinfo));
@@ -1847,7 +2033,11 @@ static void __init am335x_evm_init(void)
 	am33xx_mux_init(board_mux);
 	omap_serial_init();
 	am335x_rtc_init();
+	
+//conflicts with cap ts int pin on myd-am335x-j, MYIR
+#if !defined(CONFIG_MACH_J335X)
 	clkout2_enable();
+#endif
 	am335x_evm_i2c_init();
 	am335x_evm_setup();
 	omap_sdrc_init(NULL, NULL);

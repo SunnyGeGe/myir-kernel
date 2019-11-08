@@ -1027,7 +1027,7 @@ static int davinci_mcasp_probe(struct platform_device *pdev)
 
 	if (ret != 0)
 		goto err_iounmap;
-#if defined(CONFIG_MACH_Y335X)
+#if defined(CONFIG_MACH_Y335X)||defined(CONFIG_MACH_J335X)
 	/* 
 	 * Use AHCLKX for MCLK, and output to AHCLKX pin. MYIR
 	 */

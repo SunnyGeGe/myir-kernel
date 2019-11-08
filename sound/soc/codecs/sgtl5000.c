@@ -66,6 +66,124 @@ struct sgtl5000_priv {
 	int master;	/* i2s master or not */
 	int fmt;	/* i2s data format */
 };
+static int mic_bias_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	switch (event) {
+	case SND_SOC_DAPM_POST_PMU:
+		/* change mic bias resistor to 4Kohm */
+		snd_soc_update_bits(w->codec, SGTL5000_CHIP_MIC_CTRL,
+				SGTL5000_BIAS_R_MASK,
+				SGTL5000_BIAS_R_4k << SGTL5000_BIAS_R_SHIFT);
+		break;
+
+	case SND_SOC_DAPM_PRE_PMD:
+		snd_soc_update_bits(w->codec, SGTL5000_CHIP_MIC_CTRL,
+				SGTL5000_BIAS_R_MASK, 0);
+		break;
+	}
+	return 0;
+}
+
+/*
+ * using codec assist to small pop, hp_powerup or lineout_powerup
+ * should stay setting until vag_powerup is fully ramped down,
+ * vag fully ramped down require 400ms.
+ */
+static int small_pop_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		snd_soc_update_bits(w->codec, SGTL5000_CHIP_ANA_POWER,
+			SGTL5000_VAG_POWERUP, SGTL5000_VAG_POWERUP);
+		break;
+
+	case SND_SOC_DAPM_PRE_PMD:
+		snd_soc_update_bits(w->codec, SGTL5000_CHIP_ANA_POWER,
+			SGTL5000_VAG_POWERUP, 0);
+		msleep(400);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+/* input sources for ADC */
+static const char *adc_mux_text[] = {
+	"MIC_IN", "LINE_IN"
+};
+
+static const struct soc_enum adc_enum =
+SOC_ENUM_SINGLE(SGTL5000_CHIP_ANA_CTRL, 2, 2, adc_mux_text);
+
+static const struct snd_kcontrol_new adc_mux =
+SOC_DAPM_ENUM("Capture Mux", adc_enum);
+
+/* input sources for DAC */
+static const char *dac_mux_text[] = {
+	"DAC", "LINE_IN"
+};
+static const struct soc_enum dac_enum =
+SOC_ENUM_SINGLE(SGTL5000_CHIP_ANA_CTRL, 6, 2, dac_mux_text);
+
+static const struct snd_kcontrol_new dac_mux =
+SOC_DAPM_ENUM("Headphone Mux", dac_enum);
+static const struct snd_soc_dapm_widget sgtl5000_dapm_widgets[] = {
+	SND_SOC_DAPM_INPUT("LINE_IN"),
+	SND_SOC_DAPM_INPUT("MIC_IN"),
+
+	SND_SOC_DAPM_OUTPUT("HP_OUT"),
+	SND_SOC_DAPM_OUTPUT("LINE_OUT"),
+
+	SND_SOC_DAPM_MICBIAS_E("Mic Bias", SGTL5000_CHIP_MIC_CTRL, 8, 0,
+				mic_bias_event,
+				SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+
+	SND_SOC_DAPM_PGA_E("HP", SGTL5000_CHIP_ANA_POWER, 4, 0, NULL, 0,
+			small_pop_event,
+			SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_PRE_PMD),
+	SND_SOC_DAPM_PGA_E("LO", SGTL5000_CHIP_ANA_POWER, 0, 0, NULL, 0,
+			small_pop_event,
+			SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_PRE_PMD),
+
+	SND_SOC_DAPM_MUX("Capture Mux", SND_SOC_NOPM, 0, 0, &adc_mux),
+	SND_SOC_DAPM_MUX("Headphone Mux", SND_SOC_NOPM, 0, 0, &dac_mux),
+
+	/* aif for i2s input */
+	SND_SOC_DAPM_AIF_IN("AIFIN", "Playback",
+				0, SGTL5000_CHIP_DIG_POWER,
+				0, 0),
+
+	/* aif for i2s output */
+	SND_SOC_DAPM_AIF_OUT("AIFOUT", "Capture",
+				0, SGTL5000_CHIP_DIG_POWER,
+				1, 0),
+
+	SND_SOC_DAPM_ADC("ADC", "Capture", SGTL5000_CHIP_ANA_POWER, 1, 0),
+
+	SND_SOC_DAPM_DAC("DAC", "Playback", SGTL5000_CHIP_ANA_POWER, 3, 0),
+};
+
+/* routes for sgtl5000 */
+static const struct snd_soc_dapm_route audio_map[] = {
+	{"Capture Mux", "LINE_IN", "LINE_IN"},	/* line_in --> adc_mux */
+	{"Capture Mux", "MIC_IN", "MIC_IN"},	/* mic_in --> adc_mux */
+
+	{"ADC", NULL, "Capture Mux"},		/* adc_mux --> adc */
+	{"AIFOUT", NULL, "ADC"},		/* adc --> i2s_out */
+
+	{"DAC", NULL, "AIFIN"},			/* i2s-->dac,skip audio mux */
+	{"Headphone Mux", "DAC", "DAC"},	/* dac --> hp_mux */
+	{"LO", NULL, "DAC"},			/* dac --> line_out */
+
+	{"Headphone Mux", "LINE_IN", "LINE_IN"},/* line_in --> hp_mux */
+	{"HP", NULL, "Headphone Mux"},		/* hp_mux --> hp */
+
+	{"LINE_OUT", NULL, "LO"},
+	{"HP_OUT", NULL, "HP"},
+};
 
 /* custom function to fetch info of PCM playback volume */
 static int dac_info_volsw(struct snd_kcontrol *kcontrol,
@@ -194,15 +312,6 @@ static const unsigned int mic_gain_tlv[] = {
 /* tlv for hp volume, -51.5db to 12.0db, step .5db */
 static const DECLARE_TLV_DB_SCALE(headphone_volume, -5150, 50, 0);
 
-
-/* Added by MYIR */
-/* input sources for ADC */
-static const char *adc_mux_text[] = {
-        "MIC_IN", "LINE_IN"
-};
-static const struct soc_enum adc_enum =
-SOC_ENUM_SINGLE(SGTL5000_CHIP_ANA_CTRL, 2, 2, adc_mux_text);
-
 static const struct snd_kcontrol_new sgtl5000_snd_controls[] = {
         /* SOC_DOUBLE_S8_TLV with invert */
         {
@@ -231,9 +340,6 @@ static const struct snd_kcontrol_new sgtl5000_snd_controls[] = {
 
         SOC_SINGLE_TLV("Mic Volume", SGTL5000_CHIP_MIC_CTRL,
                         0, 4, 0, mic_gain_tlv),
-						
-		/* Added by MYIR */
-		SOC_ENUM("Input Mux", adc_enum),
 };
 
 /* mute the codec used by alsa core */
@@ -803,8 +909,10 @@ static int sgtl5000_power_init(struct snd_soc_codec *codec)
         tmp = snd_soc_read(codec, SGTL5000_CHIP_ANA_CTRL);
         tmp |= SGTL5000_HP_ZCD_EN;
         tmp |= SGTL5000_ADC_ZCD_EN;
+#if defined(CONFIG_MACH_Y335X) || defined(CONFIG_MACH_J335X)		
 		/* Added by MYIR, set adc source to line in by default */
 		tmp |= (1 << 2);
+#endif
         snd_soc_write(codec, SGTL5000_CHIP_ANA_CTRL, tmp);
 
 	return 0;
@@ -856,7 +964,50 @@ static int sgtl5000_probe(struct snd_soc_codec *codec)
 	ret = sgtl5000_power_up(codec);
 	if (ret)
 		return ret;
+    /* enable small pop, introduce 400ms delay in turning off */
+	snd_soc_update_bits(codec, SGTL5000_CHIP_REF_CTRL,
+				SGTL5000_SMALL_POP, 1);
 
+	/* disable short cut detector */
+	snd_soc_write(codec, SGTL5000_CHIP_SHORT_CTRL, 0);
+
+	/*
+	 * set i2s as default input of sound switch
+	 * TODO: add sound switch to control and dapm widge.
+	 */
+	snd_soc_write(codec, SGTL5000_CHIP_SSS_CTRL,
+			SGTL5000_DAC_SEL_I2S_IN << SGTL5000_DAC_SEL_SHIFT);
+	snd_soc_write(codec, SGTL5000_CHIP_DIG_POWER,
+			SGTL5000_ADC_EN | SGTL5000_DAC_EN);
+
+	/* enable dac volume ramp by default */
+	snd_soc_write(codec, SGTL5000_CHIP_ADCDAC_CTRL,
+			SGTL5000_DAC_VOL_RAMP_EN |
+			SGTL5000_DAC_MUTE_RIGHT |
+			SGTL5000_DAC_MUTE_LEFT);
+
+	snd_soc_write(codec, SGTL5000_CHIP_PAD_STRENGTH, 0x015f);
+
+
+		snd_soc_write(codec, SGTL5000_CHIP_ANA_CTRL,
+			SGTL5000_HP_ZCD_EN |
+			SGTL5000_ADC_ZCD_EN);
+	
+
+	snd_soc_update_bits(codec, SGTL5000_CHIP_MIC_CTRL,
+			SGTL5000_BIAS_R_MASK,
+			4 << SGTL5000_BIAS_R_SHIFT);
+
+	snd_soc_update_bits(codec, SGTL5000_CHIP_MIC_CTRL,
+			SGTL5000_BIAS_VOLT_MASK,
+			((2250/250)-5) << SGTL5000_BIAS_VOLT_SHIFT);
+	/*
+	 * disable DAP
+	 * TODO:
+	 * Enable DAP in kcontrol and dapm.
+	 */
+	snd_soc_write(codec, SGTL5000_DAP_CTRL, 0);
+    snd_soc_write(codec, SGTL5000_CHIP_DAC_VOL, 0x5555);
 	/* leading to standby state */
 	ret = sgtl5000_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 	if (ret)
@@ -864,7 +1015,7 @@ static int sgtl5000_probe(struct snd_soc_codec *codec)
 
 	snd_soc_add_controls(codec, sgtl5000_snd_controls,
 			     ARRAY_SIZE(sgtl5000_snd_controls));
-#if 0
+
 	snd_soc_dapm_new_controls(&codec->dapm, sgtl5000_dapm_widgets,
 				  ARRAY_SIZE(sgtl5000_dapm_widgets));
 
@@ -872,7 +1023,7 @@ static int sgtl5000_probe(struct snd_soc_codec *codec)
 				ARRAY_SIZE(audio_map));
 
 	snd_soc_dapm_new_widgets(&codec->dapm);
-#endif
+
 	return 0;
 
 err:

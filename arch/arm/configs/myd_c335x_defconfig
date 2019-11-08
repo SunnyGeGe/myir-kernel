@@ -1304,6 +1304,7 @@ CONFIG_DEVKMEM=y
 # Serial drivers
 #
 # CONFIG_SERIAL_8250 is not set
+CONFIG_SERIAL_SC16IS7X2=y
 
 #
 # Non-8250 serial port support
