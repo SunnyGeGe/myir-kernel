@@ -1790,7 +1790,7 @@ static int omap_nand_probe(struct platform_device *pdev)
 
 	mtd			= &info->mtd;
 	mtd->priv		= &info->nand;
-	mtd->name		= dev_name(&pdev->dev);
+	mtd->name		= "omap2-nand.0";//dev_name(&pdev->dev);
 	mtd->owner		= THIS_MODULE;
 	nand_chip		= &info->nand;
 	nand_chip->ecc.priv	= NULL;
