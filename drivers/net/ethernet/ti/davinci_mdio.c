@@ -44,70 +44,10 @@
 #include <linux/gpio/consumer.h>
 #include <linux/of_gpio.h>
 
-/*
- * This timeout definition is a worst-case ultra defensive measure against
- * unexpected controller lock ups.  Ideally, we should never ever hit this
- * scenario in practice.
- */
-#define MDIO_TIMEOUT		100 /* msecs */
-
-#define PHY_REG_MASK		0x1f
-#define PHY_ID_MASK		0x1f
-
-#define DEF_OUT_FREQ		2200000		/* 2.2 MHz */
-
-#define DEFAULT_GPIO_RESET_DELAY	10	/* in microseconds */
-
-struct davinci_mdio_regs {
-	u32	version;
-	u32	control;
-#define CONTROL_IDLE		BIT(31)
-#define CONTROL_ENABLE		BIT(30)
-#define CONTROL_MAX_DIV		(0xffff)
-
-	u32	alive;
-	u32	link;
-	u32	linkintraw;
-	u32	linkintmasked;
-	u32	__reserved_0[2];
-	u32	userintraw;
-	u32	userintmasked;
-	u32	userintmaskset;
-	u32	userintmaskclr;
-	u32	__reserved_1[20];
-
-	struct {
-		u32	access;
-#define USERACCESS_GO		BIT(31)
-#define USERACCESS_WRITE	BIT(30)
-#define USERACCESS_ACK		BIT(29)
-#define USERACCESS_READ		(0)
-#define USERACCESS_DATA		(0xffff)
-
-		u32	physel;
-	}	user[0];
-};
+#include "davinci_mdio.h"
 
 static const struct mdio_platform_data default_pdata = {
 	.bus_freq = DEF_OUT_FREQ,
-};
-
-struct davinci_mdio_data {
-	struct mdio_platform_data pdata;
-	struct davinci_mdio_regs __iomem *regs;
-	spinlock_t	lock;
-	struct clk	*clk;
-	struct device	*dev;
-	struct mii_bus	*bus;
-	bool		suspended;
-	unsigned long	access_time; /* jiffies */
-	/* Indicates that driver shouldn't modify phy_mask in case
-	 * if MDIO bus is registered from DT.
-	 */
-	bool		skip_scan;
-	struct gpio_desc **gpio_reset;
-	int		num_gpios;
-	int		reset_delay_us;
 };
 
 static void __davinci_gpio_reset(struct davinci_mdio_data *data)

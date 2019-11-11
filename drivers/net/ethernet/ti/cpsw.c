@@ -41,6 +41,7 @@
 #include "cpsw_ale.h"
 #include "cpts.h"
 #include "davinci_cpdma.h"
+#include "davinci_mdio.h"
 
 #define CPSW_DEBUG	(NETIF_MSG_HW		| NETIF_MSG_WOL		| \
 			 NETIF_MSG_DRV		| NETIF_MSG_LINK	| \
@@ -2329,44 +2330,41 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 			dev_err(&pdev->dev, "Missing mdio platform device\n");
 			return -EINVAL;
 		}
+#if defined(CONFIG_TI_DAVINCI_MDIO)
 		else
 		{
 			int addr = 0;
 			struct phy_device *phy;
-			struct mii_bus *data = dev_get_drvdata(&mdio->dev);
+			struct davinci_mdio_data *data = dev_get_drvdata(&mdio->dev);
 			/* scan and dump the bus */
-            if(data){
-				//gpio_mdio_initialize(data);
-				for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
-				phy = data->phy_map[addr];
+			for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
+				phy = data->bus->phy_map[addr];
 				if (phy) {
-					{
-						dev_info(&mdio->dev, "phy[%d]: device %s, driver %s\n",
-							phy->addr, dev_name(&phy->dev),
-							phy->drv ? phy->drv->name : "unknown");
-					}
-
+//					printk("=== phy->phy_id: %02x\n", phy->addr);
 					if(phy->addr == phyid){
 						 phyid_matched = phyid;
 						 break;
 					}
-				    }
-			    }
+				}
 			}
 //			else
-//				{
-//					phyid_matched = phyid;
-//                    #ifdef MODULE
-  //                  kernel_restart(NULL);
-    //                #else
-	//				machine_restart(NULL);
-      //              #endif
-		//		}
-        }
+//			{
+//				phyid_matched = phyid;
+//#ifdef MODULE
+//                  		kernel_restart(NULL);
+//#else
+//				machine_restart(NULL);
+//#endif
+//			}
+        	}
 		
 		snprintf(slave_data->phy_id, sizeof(slave_data->phy_id),
 			 PHY_ID_FMT, mdio->name, phyid_matched);
+#else
+		snprintf(slave_data->phy_id, sizeof(slave_data->phy_id),
+			 PHY_ID_FMT, mdio->name, phyid);
 
+#endif
 		slave_data->phy_if = of_get_phy_mode(slave_node);
 		if (slave_data->phy_if < 0) {
 			dev_err(&pdev->dev, "Missing or malformed slave[%d] phy-mode property\n",
