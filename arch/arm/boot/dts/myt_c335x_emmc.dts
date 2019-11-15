@@ -11,7 +11,7 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 
 / {
-	model = "MYIR MYT C335x EMMC";
+	model = "MYIR MYT C335X EMMC";
 	compatible = "ti,myt_c335x", "ti,am33xx";
 
 	cpus {
