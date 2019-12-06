@@ -21,7 +21,7 @@ if NET_VENDOR_TI
 config TI_DAVINCI_EMAC
 	tristate "TI DaVinci EMAC Support"
 	depends on ARM && ( ARCH_DAVINCI || ARCH_OMAP3 )
-	select TI_DAVINCI_MDIO
+#	select TI_DAVINCI_MDIO
 	select TI_DAVINCI_CPDMA
 	select PHYLIB
 	---help---
@@ -65,7 +65,7 @@ config TI_CPSW
 	tristate "TI CPSW Switch Support"
 	depends on ARCH_DAVINCI || ARCH_OMAP2PLUS
 	select TI_DAVINCI_CPDMA
-	select TI_DAVINCI_MDIO
+#	select TI_DAVINCI_MDIO
 	select TI_CPSW_PHY_SEL
 	select TI_CPSW_ALE
 	select MFD_SYSCON
