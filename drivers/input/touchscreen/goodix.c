@@ -15,6 +15,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
@@ -25,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/acpi.h>
 #include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <asm/unaligned.h>
 
 struct goodix_ts_data {
@@ -34,7 +36,12 @@ struct goodix_ts_data {
 	int abs_y_max;
 	unsigned int max_touch_num;
 	unsigned int int_trigger_type;
+	struct gpio_desc *gpiod_int;
+	struct gpio_desc *gpiod_rst;
 };
+
+#define GOODIX_GPIO_INT_NAME		"irq"
+#define GOODIX_GPIO_RST_NAME		"reset"
 
 #define GOODIX_MAX_HEIGHT		4096
 #define GOODIX_MAX_WIDTH		4096
@@ -89,6 +96,16 @@ static int goodix_i2c_read(struct i2c_client *client,
 	return ret < 0 ? ret : (ret != ARRAY_SIZE(msgs) ? -EIO : 0);
 }
 
+static void goodix_change_i2c_address(struct i2c_client *client)
+{
+	if(client->addr == 0x14){
+		client->addr = 0x5d;
+	}
+	else if(client->addr == 0x5d){
+		client->addr = 0x14;
+	}
+}
+
 static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
 {
 	int touch_num;
@@ -98,6 +115,7 @@ static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
 				GOODIX_CONTACT_SIZE + 1);
 	if (error) {
 		dev_err(&ts->client->dev, "I2C transfer error: %d\n", error);
+		goodix_change_i2c_address(ts->client);
 		return error;
 	}
 
@@ -181,6 +199,106 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
 		dev_err(&ts->client->dev, "I2C write end_cmd error\n");
 
 	return IRQ_HANDLED;
+}
+
+static int goodix_int_sync(struct goodix_ts_data *ts)
+{
+	int error;
+
+	error = gpiod_direction_output(ts->gpiod_int, 0);
+	if (error)
+		return error;
+
+	msleep(50);				/* T5: 50ms */
+
+	error = gpiod_direction_input(ts->gpiod_int);
+	if (error)
+		return error;
+
+	return 0;
+}
+
+/**
+ * goodix_reset - Reset device during power on
+ *
+ * @ts: goodix_ts_data pointer
+ */
+static int goodix_reset(struct goodix_ts_data *ts)
+{
+	int error;
+
+	/* begin select I2C slave addr */
+	error = gpiod_direction_output(ts->gpiod_rst, 0);
+	if (error)
+		return error;
+
+	msleep(20);				/* T2: > 10ms */
+
+	/* HIGH: 0x28/0x29, LOW: 0xBA/0xBB */
+	error = gpiod_direction_output(ts->gpiod_int, ts->client->addr == 0x14);
+	if (error)
+		return error;
+
+	usleep_range(100, 2000);		/* T3: > 100us */
+
+	error = gpiod_direction_output(ts->gpiod_rst, 1);
+	if (error)
+		return error;
+
+	usleep_range(6000, 10000);		/* T4: > 5ms */
+
+	/* end select I2C slave addr */
+	error = gpiod_direction_input(ts->gpiod_rst);
+	if (error)
+		return error;
+
+	error = goodix_int_sync(ts);
+	if (error)
+		return error;
+
+	return 0;
+}
+
+/**
+ * goodix_get_gpio_config - Get GPIO config from ACPI/DT
+ *
+ * @ts: goodix_ts_data pointer
+ */
+static int goodix_get_gpio_config(struct goodix_ts_data *ts)
+{
+	int error;
+	struct device *dev;
+	struct gpio_desc *gpiod;
+
+	if (!ts->client)
+		return -EINVAL;
+	dev = &ts->client->dev;
+
+	/* Get the interrupt GPIO pin number */
+	gpiod = devm_gpiod_get_optional(dev, GOODIX_GPIO_INT_NAME, GPIOD_IN);
+	if (IS_ERR(gpiod)) {
+		error = PTR_ERR(gpiod);
+		if (error != -EPROBE_DEFER)
+			dev_dbg(dev, "Failed to get %s GPIO: %d\n",
+				GOODIX_GPIO_INT_NAME, error);
+		return error;
+	}
+
+	ts->gpiod_int = gpiod;
+
+	/* Get the reset line GPIO pin number */
+	gpiod = devm_gpiod_get_optional(dev, GOODIX_GPIO_RST_NAME, GPIOD_IN);
+	if (IS_ERR(gpiod)) {
+		error = PTR_ERR(gpiod);
+		if (error != -EPROBE_DEFER)
+			dev_dbg(dev, "Failed to get %s GPIO: %d\n",
+				GOODIX_GPIO_RST_NAME, error);
+		return error;
+	}
+
+	ts->gpiod_rst = gpiod;
+
+	return 0;
 }
 
 /**
@@ -342,6 +460,26 @@ static int goodix_ts_probe(struct i2c_client *client,
 	ts->client = client;
 	i2c_set_clientdata(client, ts);
 
+	error = goodix_get_gpio_config(ts);
+	if (error)
+		return error;
+	
+	client->irq = gpiod_to_irq(ts->gpiod_int);
+
+	printk("== client->irq = 0x%x\r\n", client->irq);
+	printk("== client->addr = 0x%x\r\n", client->addr);
+
+	
+
+	if (ts->gpiod_int && ts->gpiod_rst) {
+		/* reset the controller */
+		error = goodix_reset(ts);
+		if (error) {
+			dev_err(&client->dev, "Controller reset failed.\n");
+			return error;
+		}
+	}
+
 	error = goodix_i2c_test(client);
 	if (error) {
 		dev_err(&client->dev, "I2C communication failure: %d\n", error);
@@ -360,6 +498,7 @@ static int goodix_ts_probe(struct i2c_client *client,
 	if (error)
 		return error;
 
+	printk("=== client->irq = 0x%x\r\n", client->irq);
 	irq_flags = goodix_irq_flags[ts->int_trigger_type] | IRQF_ONESHOT;
 	error = devm_request_threaded_irq(&ts->client->dev, client->irq,
 					  NULL, goodix_ts_irq_handler,
