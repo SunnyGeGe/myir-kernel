@@ -251,7 +251,7 @@
         goodix_pins_default: goodix_pins_default {
                 pinctrl-single,pins = <
 			0x160 ( PIN_INPUT | MUX_MODE7 ) /* (C15) spi0_cs1.gpio0[6] */
-			0x1a8 ( PIN_OUTPUT_PULLUP | MUX_MODE7 ) /* (D12) mcasp0_axr1.gpio3[20] */
+			0x1a8 ( PIN_OUTPUT_PULLUP | MUX_MODE7 ) /* (D13) mcasp0_axr1.gpio3[20] */
                 >;
         };
 		
@@ -548,17 +548,33 @@
 
 &gpio0 {
 	status = "okay";
+	ti,no-reset-on-init;
+        p19 {
+                gpio-hog;
+                gpios = <19 GPIO_ACTIVE_HIGH>;
+                output-high;
+                line-name = "LCD_STB";
+        };
 };
 &gpio1 {
 	status = "okay";
+	ti,no-reset-on-init;
+        p18 {
+                gpio-hog;
+                gpios = <18 GPIO_ACTIVE_HIGH>;
+                output-high;
+                line-name = "LCD_RST";
+        };
 };
 
 &gpio2 {
 	status = "okay";
+	ti,no-reset-on-init;
 };
 
 &gpio3 {
 	status = "okay";
+	ti,no-reset-on-init;
 };
 
 &uart0 {
@@ -647,7 +663,7 @@
 		pinctrl-0 = <&ft5x0x_pins_default>;
                 reg = <0x38>;
                 tp_int = <&gpio0 6 1>;
-                tp_resetn = <&gpio3 16 1>;
+                tp_resetn = <&gpio3 20 1>;
                 polling_mode = /bits/ 8 <0>;
                 multi_touch = /bits/ 8 <0>;
             };
