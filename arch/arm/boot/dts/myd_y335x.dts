@@ -426,7 +426,7 @@
 			0x0FC (PIN_INPUT_PULLUP | MUX_MODE0)    /* mmc0_dat0.mmc0_dat0 */
 			0x100 (PIN_INPUT_PULLUP | MUX_MODE0)    /* mmc0_clk.mmc0_clk */
 			0x104 (PIN_INPUT_PULLUP | MUX_MODE0)    /* mmc0_cmd.mmc0_cmd */
-			0x1A4 (PIN_INPUT_PULLUP | MUX_MODE7)    /* mcasp0_fsr.gpio3_19 */
+			0x1AC (PIN_INPUT_PULLUP | MUX_MODE7)    /* (A14) mcasp0_ahclkx.gpio3[21]*/ 
 			
 		>;
 	};
@@ -879,12 +879,12 @@
 };
 
 &mac {
-//	slaves = <2>;
+	slaves = <1>;
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&cpsw_default>;
 	pinctrl-1 = <&cpsw_sleep>;
 //	dual_emac = <1>;
-//	active_slave = <1>;
+	active_slave = <1>;
 	status = "okay";
 };
 
@@ -901,11 +901,12 @@
 //	dual_emac_res_vlan=<0>;
 };
 
-//&cpsw_emac1 {
-//	phy_id = <&davinci_mdio>, <6>;
-//	phy-mode = "rgmii-txid";
-//	dual_emac_res_vlan=<1>;
-//};
+&cpsw_emac1 {
+	status = "disabled";
+	phy_id = <&davinci_mdio>, <6>;
+	phy-mode = "rgmii-txid";
+	dual_emac_res_vlan=<1>;
+};
 
 &tscadc {
 	status = "okay";
@@ -929,7 +930,7 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&mmc1_pins_default>;
 	pinctrl-1 = <&mmc1_pins_sleep>;
-	cd-gpios = <&gpio3 19 GPIO_ACTIVE_HIGH>;
+	cd-gpios = <&gpio3 21 GPIO_ACTIVE_HIGH>;
 };
 
 &mmc3 {
