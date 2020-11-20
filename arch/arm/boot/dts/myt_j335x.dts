@@ -22,7 +22,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x80000000 0x10000000>; /* 256 MB */
+		reg = <0x80000000 0x20000000>; /* 512 MB */
 	};
 
 	vbat: fixedregulator@0 {
@@ -45,25 +45,26 @@
 	};
 
 
-//	watchdog: watchdog {
-//		/* CAT823T */
-//		compatible = "linux,wdt-gpio";
-//		pinctrl-names = "default";
-//		pinctrl-0 = <&watchdog_pins>;
-//		gpios = <&gpio3 8 GPIO_ACTIVE_LOW>;
-//		hw_algo = "toggle";
-//		always-running;
-//		hw_margin_ms = <1000>;
-//	};
+
+	watchdog: watchdog {
+		/* CAT823T */
+		compatible = "linux,wdt-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&watchdog_pins>;
+		gpios = <&gpio3 8 GPIO_ACTIVE_LOW>;
+		hw_algo = "toggle";
+		always-running;
+		hw_margin_ms = <1000>;
+	};
 };
 
 &am33xx_pinmux {
 	pinctrl-names = "default";
 	pinctrl-0 = <&gpio_pins_default>;
 	
-//	watchdog_pins: pinmux_watchdog_pins{
-//		pinctrl-single,pins = <0x1E8 (PIN_OUTPUT_PULLDOWN | MUX_MODE7)>;
-//	};
+	watchdog_pins: pinmux_watchdog_pins{
+		pinctrl-single,pins = <0x1E8 (PIN_OUTPUT_PULLUP | MUX_MODE7)>;
+	};
 
 
 	gpio_pins_default: gpio_pins_default {
@@ -132,7 +133,7 @@
 		0x10c ( PIN_INPUT_PULLUP | MUX_MODE7 ) /* (H17) gmii1_crs.gpio3[1] */
 		0x110 ( PIN_INPUT_PULLUP | MUX_MODE7 ) /* (J15) gmii1_rxer.gpio3[2] */
 		0x1e4 ( PIN_INPUT_PULLUP | MUX_MODE7 ) /* (C14) EMU0.gpio3[7] */
-		0x1e8 ( PIN_INPUT | MUX_MODE7 ) /* (B14) EMU1.gpio3[8] */
+//		0x1e8 ( PIN_INPUT | MUX_MODE7 ) /* (B14) EMU1.gpio3[8] */
 		0x190 ( PIN_INPUT_PULLUP | MUX_MODE7 ) /* (A13) mcasp0_aclkx.gpio3[14] */
 		0x194 ( PIN_INPUT_PULLUP | MUX_MODE7 ) /* (B13) mcasp0_fsx.gpio3[15] */
 		0x198 ( PIN_INPUT | MUX_MODE7 ) /* (D12) mcasp0_axr0.gpio3[16] */
@@ -473,7 +474,7 @@
 		dcdc2_reg: regulator@1 {
 			/* VDD_MPU voltage limits 0.95V - 1.325V with +/-4% tolerance */
 			regulator-name = "vdd_mpu";
-			regulator-min-microvolt = <925000>;
+			regulator-min-microvolt = <950000>;
 			regulator-max-microvolt = <1378000>;
 			regulator-boot-on;
 			regulator-always-on;
@@ -482,7 +483,7 @@
 		dcdc3_reg: regulator@2 {
 			/* VDD_CORE voltage limits 0.95V - 1.1V with +/-4% tolerance */
 			regulator-name = "vdd_core";
-			regulator-min-microvolt = <925000>;
+			regulator-min-microvolt = <950000>;
 			regulator-max-microvolt = <1150000>;
 			regulator-boot-on;
 			regulator-always-on;
